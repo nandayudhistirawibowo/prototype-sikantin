@@ -1,0 +1,3016 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SiKantin UYM — Pesan Dulu, Ambil Tanpa Antre</title>
+  <link rel="icon" type="image/png" href="logo-uym.png">
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Plus Jakarta Sans & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  
+  <!-- Tailwind Configuration matching UYM LMS Branding -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            uym: {
+              navy: '#043C89',
+              dark: '#002B66',
+              royal: '#0F52BA',
+              blue: '#165AC5',
+              sky: '#2563EB',
+              soft: '#EBF3FE',
+              accent: '#C68B3F', // Gold wheat from logo
+              card: '#FFFFFF',
+              bg: '#F8FAFC',
+              border: '#E2E8F0',
+              textDark: '#1E293B',
+              textMuted: '#64748B'
+            }
+          },
+          fontFamily: {
+            sans: ['"Plus Jakarta Sans"', 'Inter', 'sans-serif']
+          },
+          boxShadow: {
+            'lms': '0 2px 8px -2px rgba(15, 60, 137, 0.08), 0 1px 3px 0 rgba(0, 0, 0, 0.04)',
+            'card-hover': '0 10px 25px -5px rgba(15, 60, 137, 0.12), 0 8px 10px -6px rgba(0, 0, 0, 0.04)'
+          }
+        }
+      }
+    }
+
+    // ============================================================
+    // KTM SMARTPAY TOP UP LOGIC
+    // ============================================================
+    function formatRupiah(num) {
+      return 'Rp ' + num.toLocaleString('id-ID');
+    }
+
+    function updateSaldoDisplay() {
+      const displays = ['saldo-sidebar', 'saldo-display-card', 'topup-current-saldo'];
+      displays.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'saldo-display-card') {
+          el.innerText = state_saldo >= 1000 ? 'Rp ' + Math.round(state_saldo/1000) + 'rb' : formatRupiah(state_saldo);
+        } else {
+          el.innerText = formatRupiah(state_saldo);
+        }
+      });
+      // Also update checkout payment method label
+      const ktmBadge = document.querySelector('[data-ktm-saldo]');
+      if (ktmBadge) ktmBadge.innerText = 'Sisa: ' + formatRupiah(state_saldo);
+    }
+
+    function selectTopUpAmount(amount) {
+      const input = document.getElementById('topup-custom-input');
+      if (input) input.value = amount;
+      // Highlight selected button
+      document.querySelectorAll('.topup-nominal-btn').forEach(btn => {
+        btn.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-700');
+        btn.classList.add('border-slate-200', 'text-slate-700');
+      });
+      const btns = document.querySelectorAll('.topup-nominal-btn');
+      btns.forEach(btn => {
+        const label = btn.innerText;
+        const match = label.match(/(\d+)/);
+        if (match) {
+          const val = parseInt(match[1]) * (label.includes('rb') ? 1000 : 1);
+          if (val === amount) {
+            btn.classList.add('border-amber-400', 'bg-amber-50', 'text-amber-700');
+            btn.classList.remove('border-slate-200', 'text-slate-700');
+          }
+        }
+      });
+    }
+
+    function syncTopUpInput(val) {
+      // Clear button selections when user types manually
+      document.querySelectorAll('.topup-nominal-btn').forEach(btn => {
+        btn.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-700');
+        btn.classList.add('border-slate-200', 'text-slate-700');
+      });
+    }
+
+    function processTopUp() {
+      const input = document.getElementById('topup-custom-input');
+      const amount = parseInt(input ? input.value : 0);
+
+      if (!amount || amount < 10000) {
+        showToast('⚠️ Minimal top up adalah Rp 10.000');
+        return;
+      }
+      if (amount > 1000000) {
+        showToast('⚠️ Maksimal top up adalah Rp 1.000.000');
+        return;
+      }
+
+      const methodRadios = document.getElementsByName('topup-method');
+      let method = 'QRIS';
+      for (const r of methodRadios) { if (r.checked) method = r.value; }
+
+      // Simulate loading
+      const btn = document.querySelector('#modal-topup button[onclick="processTopUp()"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">⏳ Memproses...</span>';
+      }
+
+      setTimeout(() => {
+        state_saldo += amount;
+        updateSaldoDisplay();
+        closeModal('modal-topup');
+        if (input) input.value = '';
+        document.querySelectorAll('.topup-nominal-btn').forEach(b => {
+          b.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-700');
+          b.classList.add('border-slate-200', 'text-slate-700');
+        });
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i data-lucide="zap" class="w-4 h-4"></i><span>Top Up Sekarang</span>';
+          lucide.createIcons();
+        }
+        showToast('✅ Top Up ' + formatRupiah(amount) + ' via ' + method + ' berhasil! Saldo: ' + formatRupiah(state_saldo));
+      }, 1500);
+    }
+
+    // ============================================================
+    // TENANT MANAGEMENT LOGIC
+    // ============================================================
+    function renderTenantList() {
+      const grid = document.getElementById('tenant-list-grid');
+      if (!grid) return;
+      const tenantCount = document.getElementById('tenant-count');
+      if (tenantCount) tenantCount.textContent = tenantList.length;
+
+      if (tenantList.length === 0) {
+        grid.innerHTML = `
+          <div class="sm:col-span-2 text-center py-8 text-slate-400">
+            <i data-lucide="store" class="w-10 h-10 mx-auto mb-2 opacity-40"></i>
+            <p class="text-sm font-semibold">Belum ada tenant terdaftar.</p>
+            <p class="text-xs mt-1">Klik "Tambah Tenant" untuk mendaftarkan penyedia pertama.</p>
+          </div>`;
+        lucide.createIcons();
+        return;
+      }
+
+      grid.innerHTML = tenantList.map(t => `
+        <div class="p-3 rounded-lg border ${t.status === 'buka' ? 'border-slate-100' : 'border-slate-200 opacity-70'} bg-slate-50 hover:bg-blue-50/50 transition group relative">
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0 pr-2">
+              <p class="text-xs font-bold text-slate-800 truncate">${t.name}</p>
+              <p class="text-[11px] text-slate-500 mt-0.5 line-clamp-1">${t.desc || '—'}</p>
+            </div>
+            <div class="flex items-center space-x-1 shrink-0">
+              <button onclick="openEditTenant('${t.id}')" title="Edit" class="p-1 rounded-md hover:bg-blue-100 text-slate-400 hover:text-uym-royal transition">
+                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="deleteTenant('${t.id}')" title="Hapus" class="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mt-2 flex items-center justify-end text-[10px]">
+            <div class="flex items-center space-x-1.5 text-slate-500">
+              ${t.status === 'tutup' ? '<span class="text-rose-500 font-bold">TUTUP</span>' : '<span>Estimasi ' + t.estimasi + '</span>'}
+            </div>
+          </div>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function openEditTenant(tenantId) {
+      const t = tenantList.find(x => x.id === tenantId);
+      if (!t) return;
+
+      document.getElementById('tenant-modal-title').innerText = 'Edit Data Tenant';
+      document.getElementById('tenant-save-btn-label').innerText = 'Simpan Perubahan';
+      document.getElementById('tenant-edit-id').value = t.id;
+      document.getElementById('tenant-form-name').value = t.name;
+      document.getElementById('tenant-form-desc').value = t.desc;
+      document.getElementById('tenant-form-estimasi').value = t.estimasi;
+
+      const statusRadios = document.getElementsByName('tenant-status');
+      for (const r of statusRadios) { if (r.value === t.status) r.checked = true; }
+
+      openModal('modal-tambah-tenant');
+      lucide.createIcons();
+    }
+
+    function closeTenantModal() {
+      closeModal('modal-tambah-tenant');
+      // Reset form for next use
+      document.getElementById('tenant-modal-title').innerText = 'Tambah Tenant Baru';
+      document.getElementById('tenant-save-btn-label').innerText = 'Simpan Tenant';
+      document.getElementById('tenant-edit-id').value = '';
+      document.getElementById('tenant-form-name').value = '';
+      document.getElementById('tenant-form-desc').value = '';
+      document.getElementById('tenant-form-estimasi').value = '~8 Mnt';
+      const statusRadios = document.getElementsByName('tenant-status');
+      for (const r of statusRadios) { if (r.value === 'buka') r.checked = true; }
+    }
+
+    function saveTenant() {
+      const name = document.getElementById('tenant-form-name').value.trim();
+      if (!name) {
+        showToast('⚠️ Nama tenant wajib diisi!');
+        document.getElementById('tenant-form-name').focus();
+        return;
+      }
+
+      const desc = document.getElementById('tenant-form-desc').value.trim();
+      const estimasi = document.getElementById('tenant-form-estimasi').value;
+      const statusRadios = document.getElementsByName('tenant-status');
+      let status = 'buka';
+      for (const r of statusRadios) { if (r.checked) status = r.value; }
+
+      const editId = document.getElementById('tenant-edit-id').value;
+
+      if (editId) {
+        // Edit existing
+        const idx = tenantList.findIndex(t => t.id === editId);
+        if (idx > -1) {
+          tenantList[idx] = { ...tenantList[idx], name, desc, estimasi, status };
+          showToast('✅ Data tenant "' + name + '" berhasil diperbarui.');
+        }
+      } else {
+        // Add new
+        const newTenant = {
+          id: 't' + Date.now(),
+          name, desc, estimasi, status
+        };
+        tenantList.push(newTenant);
+        showToast('🏪 Tenant "' + name + '" berhasil ditambahkan ke Kantin UYM!');
+      }
+
+      renderTenantList();
+      closeTenantModal();
+    }
+
+    function deleteTenant(tenantId) {
+      const t = tenantList.find(x => x.id === tenantId);
+      if (!t) return;
+      if (!confirm('Hapus tenant "' + t.name + '" dari daftar?')) return;
+      tenantList = tenantList.filter(x => x.id !== tenantId);
+      renderTenantList();
+      showToast('🗑️ Tenant "' + t.name + '" dihapus dari daftar.');
+    }
+
+    // Initialize tenant list and saldo on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      renderTenantList();
+      updateSaldoDisplay();
+    });
+
+  </script>
+
+  <style>
+    body {
+      font-family: 'Plus Jakarta Sans', Inter, sans-serif;
+      background-color: #F8FAFC;
+      color: #1E293B;
+    }
+    
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #F1F5F9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #CBD5E1;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94A3B8;
+    }
+
+    /* Pulse animation for live badge */
+    @keyframes pulse-subtle {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.85; transform: scale(1.05); }
+    }
+    .animate-pulse-subtle {
+      animation: pulse-subtle 2s infinite ease-in-out;
+    }
+
+    /* Simulation modal backdrop */
+    .modal-backdrop {
+      background: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(4px);
+    }
+
+    /* Device frame preview mode */
+    .device-mobile-frame {
+      max-width: 410px;
+      margin: 0 auto;
+      border-radius: 40px;
+      box-shadow: 0 25px 50px -12px rgba(15, 60, 137, 0.25), 0 0 0 10px #1E293B;
+      overflow: hidden;
+      min-height: 844px;
+      position: relative;
+    }
+
+    @media (min-width: 1024px) {
+      #desktop-sidebar.sidebar-is-collapsed {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col bg-slate-50 antialiased selection:bg-uym-blue selection:text-white">
+
+  <!-- TOP NOTIFICATION BAR (Academic Project Context) -->
+  <header class="bg-gradient-to-r from-uym-navy to-uym-royal text-white text-xs px-4 py-1.5 flex items-center justify-between border-b border-blue-900/30">
+    <div class="flex items-center space-x-2 font-medium">
+      <span class="bg-amber-400 text-slate-900 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider">Tugas UI/UX Semester 5</span>
+      <span class="hidden sm:inline">Mata Kuliah: IKM503 Desain UI/UX &bull; Universitas Yatsi Madani</span>
+      <span class="sm:hidden font-semibold">SiKantin UYM</span>
+    </div>
+    <div class="flex items-center space-x-3">
+      <!-- Live Time matching LMS -->
+      <span id="live-clock" class="text-blue-100 font-mono text-[11px] hidden md:inline">21 Okt 2026, 21:55:00 WIB</span>
+      <!-- Switch Prototype View: Desktop or Mobile Simulator -->
+      <button onclick="toggleDeviceView()" id="view-mode-btn" class="bg-white/15 hover:bg-white/25 text-white px-2.5 py-1 rounded text-[11px] font-semibold flex items-center space-x-1.5 transition">
+        <i data-lucide="smartphone" class="w-3.5 h-3.5"></i>
+        <span id="view-mode-label">Mode HP</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- APP CONTAINER -->
+  <div id="app-wrapper" class="w-full flex-1 flex flex-col transition-all duration-300">
+    <div class="flex flex-1 w-full max-w-[1600px] mx-auto">
+      
+      <!-- ========================================== -->
+      <!-- 1. DESKTOP SIDEBAR (Identik dengan LMS UYM) -->
+      <!-- ========================================== -->
+      <aside id="desktop-sidebar" class="w-64 bg-white border-r border-slate-200 shrink-0 hidden lg:flex flex-col justify-between p-4 sticky top-0 h-[calc(100vh-32px)]">
+        <div>
+          <!-- Brand Logo & Header -->
+          <div class="relative flex flex-col items-center text-center pb-4 border-b border-slate-100">
+            <button onclick="toggleMobileMenu()" aria-label="Tutup menu navigasi" title="Tutup menu navigasi" class="hidden lg:flex absolute top-0 right-0 p-1.5 rounded-lg hover:bg-slate-100 text-slate-500 transition">
+              <i data-lucide="x" class="w-4 h-4"></i>
+            </button>
+            <div class="w-20 h-20 mb-2 flex items-center justify-center p-1 rounded-full bg-slate-50 border border-slate-100 shadow-sm">
+              <img src="logo-uym.png" alt="Logo Universitas Yatsi Madani" class="w-full h-full object-contain">
+            </div>
+            <h1 class="text-sm font-bold text-uym-navy uppercase tracking-tight leading-tight">Universitas Yatsi Madani</h1>
+            <p class="text-[11px] text-slate-500 font-medium">Sistem Pemesanan Kantin Mahasiswa</p>
+          </div>
+
+          <!-- User Profile Card (Gaya Civitas LMS UYM) -->
+          <div class="my-4 bg-gradient-to-r from-uym-navy to-uym-blue text-white rounded-xl p-3 shadow-md">
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-full border-2 border-white/80 overflow-hidden bg-slate-200 shrink-0 flex items-center justify-center">
+                <!-- Avatar image/initial -->
+                <img src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80" alt="Avatar" class="w-full h-full object-cover">
+              </div>
+              <div class="flex-1 min-w-0">
+                <p class="text-xs font-bold truncate">NANDA</p>
+                <p class="text-[11px] text-blue-200">Mahasiswa &bull; AP2405A</p>
+              </div>
+              <i data-lucide="chevron-down" class="w-4 h-4 text-blue-200"></i>
+            </div>
+            <div class="mt-2.5 pt-2 border-t border-white/15 flex items-center justify-between text-[11px]">
+              <span class="bg-emerald-500/20 text-emerald-200 px-2 py-0.5 rounded-full font-semibold border border-emerald-400/30">
+                Periode 2026/2027 Ganjil
+              </span>
+            </div>
+          </div>
+
+          <!-- Navigation Links -->
+          <nav class="space-y-1">
+            <button onclick="navigateTo('beranda')" id="nav-beranda" class="nav-item w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition text-uym-navy bg-uym-soft border-l-4 border-uym-navy">
+              <i data-lucide="home" class="w-4 h-4"></i>
+              <span>Beranda</span>
+            </button>
+
+            <button onclick="navigateTo('katalog')" id="nav-katalog" class="nav-item w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-uym-navy hover:bg-slate-100 transition">
+              <i data-lucide="utensils" class="w-4 h-4"></i>
+              <span>Katalog Menu</span>
+            </button>
+            <button onclick="navigateTo('keranjang')" id="nav-keranjang" class="nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-uym-navy hover:bg-slate-100 transition">
+              <div class="flex items-center space-x-3">
+                <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+                <span>Keranjang</span>
+              </div>
+              <span id="cart-badge-desktop" class="bg-uym-royal text-white text-[11px] font-bold px-2 py-0.5 rounded-full">0</span>
+            </button>
+
+            <button onclick="navigateTo('status')" id="nav-status" class="nav-item w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-uym-navy hover:bg-slate-100 transition">
+              <div class="flex items-center space-x-3">
+                <i data-lucide="activity" class="w-4 h-4"></i>
+                <span>Status Pesanan</span>
+              </div>
+              <span id="active-order-badge" class="hidden bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full animate-pulse">1</span>
+            </button>
+
+            <button onclick="navigateTo('demo')" id="nav-demo" class="nav-item w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-uym-navy hover:bg-slate-100 transition">
+              <i data-lucide="clock" class="w-4 h-4"></i>
+              <span>Simulasi Pemesanan</span>
+            </button>
+
+            <button onclick="navigateTo('history')" id="nav-history" class="nav-item w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-uym-navy hover:bg-slate-100 transition">
+              <i data-lucide="receipt-text" class="w-4 h-4"></i>
+              <span>Riwayat Pesanan</span>
+            </button>
+
+            <button onclick="openModal('modal-info-uym')" class="nav-item w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:text-uym-navy hover:bg-slate-100 transition">
+              <i data-lucide="help-circle" class="w-4 h-4"></i>
+              <span>Info Kantin & Bantuan</span>
+            </button>
+          </nav>
+        </div>
+
+        <!-- Sidebar Footer: Balance / Quick Saldo — INTERACTIVE -->
+        <div onclick="openModal('modal-topup')" class="bg-slate-50 border border-slate-200/80 rounded-xl p-3 cursor-pointer hover:border-amber-300 hover:bg-amber-50 transition group">
+          <div class="flex items-center justify-between mb-1.5">
+            <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Saldo Mahasiswa</span>
+            <span class="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded">Aktif</span>
+          </div>
+          <p id="saldo-sidebar" class="text-base font-extrabold text-uym-navy">Rp 45.000</p>
+          <p class="text-[10px] text-amber-500 font-semibold mt-0.5 flex items-center space-x-1 group-hover:text-amber-600">
+            <i data-lucide="plus-circle" class="w-3 h-3"></i>
+            <span>KTM SmartPay · Tap Top Up</span>
+          </p>
+        </div>
+      </aside>
+
+      <!-- ========================================== -->
+      <!-- 2. MAIN CONTENT AREA -->
+      <!-- ========================================== -->
+      <main class="flex-1 flex flex-col min-w-0 bg-slate-50">
+        
+        <!-- TOP APP BAR (For Mobile & Desktop Content Header) -->
+        <header class="bg-white border-b border-slate-200 sticky top-0 z-30 px-4 sm:px-6 py-3 flex items-center justify-between shadow-xs">
+          <!-- Mobile Brand & Drawer Toggle -->
+          <div class="flex items-center space-x-3">
+            <div class="lg:hidden flex items-center space-x-2">
+              <img src="logo-uym.png" alt="Logo UYM" class="w-8 h-8 object-contain">
+              <div>
+                <span class="text-sm font-extrabold text-uym-navy tracking-tight">SiKantin</span>
+                <span class="block text-[9px] text-slate-400 leading-none">Universitas Yatsi Madani</span>
+              </div>
+            </div>
+            <!-- Desktop Greeting (Identik screenshot LMS) -->
+            <div class="hidden lg:block">
+              <h2 class="text-lg font-bold text-slate-800 tracking-tight flex items-center space-x-2">
+                <span>Hi, Nanda Yudhistira Wibowo</span>
+                <span class="inline-block origin-bottom-right animate-bounce">👋</span>
+              </h2>
+              <p class="text-xs text-slate-500 font-medium">
+                Selamat Datang Di SiKantin UYM &bull; <span class="text-uym-royal font-semibold italic">“Pesan dulu, ambil tanpa antre.”</span>
+              </p>
+            </div>
+          </div>
+
+          <!-- Top Action Buttons -->
+          <div class="flex items-center space-x-2 sm:space-x-3">
+            <!-- Search Quick Button -->
+            <button onclick="navigateTo('katalog')" class="p-2 text-slate-500 hover:text-uym-navy hover:bg-slate-100 rounded-lg transition" title="Cari Menu">
+              <i data-lucide="search" class="w-5 h-5"></i>
+            </button>
+
+            <!-- Cart Trigger Button -->
+            <button onclick="navigateTo('keranjang')" class="relative p-2 text-slate-600 hover:text-uym-navy hover:bg-slate-100 rounded-lg transition" title="Lihat Keranjang">
+              <i data-lucide="shopping-bag" class="w-5 h-5"></i>
+              <span id="cart-badge-header" class="absolute -top-1 -right-1 bg-uym-royal text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-white">0</span>
+            </button>
+
+            <!-- Mobile Hamburger Menu Button -->
+            <button onclick="toggleMobileMenu()" id="navigation-toggle-btn" aria-label="Buka menu navigasi" aria-expanded="false" title="Buka menu navigasi" class="p-2 bg-slate-800 text-white rounded-lg hover:bg-slate-900 transition">
+              <i data-lucide="menu" class="w-5 h-5"></i>
+            </button>
+          </div>
+        </header>
+
+        <!-- MOBILE DRAWER MENU (Dropdown / Modal) -->
+        <div id="mobile-menu-drawer" class="fixed inset-0 z-50 modal-backdrop hidden lg:hidden">
+          <div class="w-72 bg-white h-full p-4 flex flex-col justify-between shadow-2xl animate-in slide-in-from-left duration-200">
+            <div>
+              <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+                <div class="flex items-center space-x-2">
+                  <img src="logo-uym.png" alt="Logo UYM" class="w-8 h-8 object-contain">
+                  <span class="font-bold text-uym-navy text-sm">SiKantin UYM</span>
+                </div>
+                <button onclick="toggleMobileMenu()" aria-label="Tutup menu navigasi" title="Tutup menu navigasi" class="p-1 rounded-lg hover:bg-slate-100 text-slate-500">
+                  <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+              </div>
+
+              <!-- Mobile User Card -->
+              <div class="my-3 p-3 bg-gradient-to-r from-uym-navy to-uym-blue text-white rounded-xl">
+                <div class="flex items-center space-x-2.5">
+                  <div class="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center font-bold text-xs border border-white/50">
+                    NY
+                  </div>
+                  <div>
+                    <p class="text-xs font-bold">Nanda Yudhistira W.</p>
+                    <p class="text-[10px] text-blue-200">Mahasiswa &bull; AP2405A</p>
+                  </div>
+                </div>
+                <div class="mt-2 text-[10px] bg-white/10 px-2 py-0.5 rounded text-blue-100 inline-block">
+                  Semester 5 &bull; UI/UX Project
+                </div>
+              </div>
+
+              <!-- Mobile Nav List -->
+              <nav class="space-y-1">
+                <button onclick="navigateTo('beranda'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-semibold text-uym-navy bg-uym-soft">
+                  <i data-lucide="home" class="w-4 h-4"></i>
+                  <span>Beranda</span>
+                </button>
+                <button onclick="navigateTo('katalog'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  <i data-lucide="utensils" class="w-4 h-4"></i>
+                  <span>Katalog Menu</span>
+                </button>
+                <button onclick="navigateTo('keranjang'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  <i data-lucide="shopping-cart" class="w-4 h-4"></i>
+                  <span>Keranjang Saya</span>
+                </button>
+                <button onclick="navigateTo('status'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  <i data-lucide="activity" class="w-4 h-4"></i>
+                  <span>Status Pesanan</span>
+                </button>
+                <button onclick="navigateTo('demo'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  <i data-lucide="clock" class="w-4 h-4"></i>
+                  <span>Simulasi Pemesanan</span>
+                </button>
+                <button onclick="navigateTo('history'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  <i data-lucide="receipt-text" class="w-4 h-4"></i>
+                  <span>Riwayat Pesanan</span>
+                </button>
+                <button onclick="openModal('modal-info-uym'); toggleMobileMenu();" class="w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50">
+                  <i data-lucide="help-circle" class="w-4 h-4"></i>
+                  <span>Bantuan & Info Kantin</span>
+                </button>
+              </nav>
+            </div>
+
+            <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs">
+              <p class="font-bold text-slate-700">SiKantin UYM v1.0 MVP</p>
+              <p class="text-[11px] text-slate-500">Tugas Kuliah Desain UI/UX</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================================================== -->
+        <!-- 3. SIX CORE MVP PAGES CONTAINER                          -->
+        <!-- ======================================================== -->
+        <div class="flex-1 p-4 sm:p-6 lg:p-8">
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 1: BERANDA                                    -->
+          <!-- ===================================================== -->
+          <section id="page-beranda" class="page-view space-y-6">
+            
+            <!-- Mobile Greeting (shown on mobile, hidden on lg desktop) -->
+            <div class="lg:hidden">
+              <h2 class="text-xl font-extrabold text-slate-800 tracking-tight flex items-center space-x-1.5">
+                <span>Hi, Nanda Yudhistira Wibowo</span>
+                <span>👋</span>
+              </h2>
+              <p class="text-xs text-slate-500 mt-0.5">Selamat Datang Di SiKantin UYM</p>
+              <p class="text-xs font-semibold text-uym-royal mt-1 italic">“Pesan dulu, ambil tanpa antre.”</p>
+            </div>
+
+            <!-- 4 SUMMARY CARDS (PERSIS GAYA KARTU STAT LMS UYM: Tugas, Kuis, Forum, Vidcon) -->
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              
+              <!-- Card 1: Pesanan Aktif (Cyan icon box) -->
+              <div onclick="navigateTo('status')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200/80 shadow-lms hover:shadow-card-hover transition flex items-center justify-between">
+                <div>
+                  <p class="text-xs font-semibold text-slate-500">Pesanan Aktif</p>
+                  <p id="stat-active-orders" class="text-2xl font-extrabold text-slate-800 mt-1">1</p>
+                  <p id="stat-active-order-status" class="text-[10px] text-emerald-600 font-medium mt-0.5">Belum ada pesanan aktif</p>
+                </div>
+                <div class="w-11 h-11 rounded-xl bg-cyan-500 text-white flex items-center justify-center shadow-sm">
+                  <i data-lucide="clipboard-list" class="w-6 h-6"></i>
+                </div>
+              </div>
+
+              <!-- Card 2: Saldo Mahasiswa (Orange/Amber icon box) — INTERACTIVE TOP UP -->
+              <div onclick="openModal('modal-topup')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200/80 shadow-lms hover:shadow-card-hover hover:border-amber-300 transition flex items-center justify-between group relative">
+                <div>
+                  <p class="text-xs font-semibold text-slate-500">Saldo Mahasiswa</p>
+                  <p id="saldo-display-card" class="text-xl sm:text-2xl font-extrabold text-slate-800 mt-1">Rp 45rb</p>
+                  <p class="text-[10px] text-amber-500 font-semibold mt-0.5 flex items-center space-x-1">
+                    <i data-lucide="plus-circle" class="w-3 h-3"></i>
+                    <span>KTM SmartPay · Tap Top Up</span>
+                  </p>
+                </div>
+                <div class="w-11 h-11 rounded-xl bg-amber-500 group-hover:bg-amber-600 text-white flex items-center justify-center shadow-sm transition">
+                  <i data-lucide="wallet" class="w-6 h-6"></i>
+                </div>
+              </div>
+
+              <!-- Card 3: Kantin Buka (Green icon box) -->
+              <div class="bg-white p-4 rounded-xl border border-slate-200/80 shadow-lms hover:shadow-card-hover transition flex items-center justify-between">
+                <div>
+                  <p class="text-xs font-semibold text-slate-500">Tenant Buka</p>
+                  <p class="text-2xl font-extrabold text-slate-800 mt-1"><span id="tenant-count">3</span> Stand</p>
+                  <p class="text-[10px] text-emerald-600 font-medium mt-0.5">07:30 - 17:00 WIB</p>
+                </div>
+                <div class="w-11 h-11 rounded-xl bg-emerald-500 text-white flex items-center justify-center shadow-sm">
+                  <i data-lucide="store" class="w-6 h-6"></i>
+                </div>
+              </div>
+
+              <!-- Card 4: Voucher / Promo (Red icon box) -->
+              <div onclick="applyPromoCode('UYMHEMAT')" class="cursor-pointer bg-white p-4 rounded-xl border border-slate-200/80 shadow-lms hover:shadow-card-hover transition flex items-center justify-between">
+                <div>
+                  <p class="text-xs font-semibold text-slate-500">Promo Khusus</p>
+                  <p class="text-2xl font-extrabold text-slate-800 mt-1">2 Kupon</p>
+                  <p class="text-[10px] text-rose-600 font-medium mt-0.5">Hemat s/d 20%</p>
+                </div>
+                <div class="w-11 h-11 rounded-xl bg-rose-500 text-white flex items-center justify-center shadow-sm">
+                  <i data-lucide="tag" class="w-6 h-6"></i>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- PROMO BANNER MAHASISWA -->
+            <div id="home-promo-banner" class="relative isolate overflow-hidden rounded-2xl bg-uym-navy text-white p-5 sm:p-6 shadow-md">
+              <img src="kampus-uym-bg.jpg" alt="" aria-hidden="true" class="absolute inset-0 -z-20 h-full w-full object-cover object-[center_30%]">
+              <div class="absolute inset-0 -z-10" style="background: linear-gradient(90deg, rgba(10, 45, 102, .88) 0%, rgba(10, 45, 102, .82) 55%, rgba(10, 45, 102, .72) 100%);"></div>
+              <div class="relative z-10 max-w-xl">
+                <span class="inline-block bg-amber-400 text-slate-900 text-[11px] font-black uppercase px-2.5 py-0.5 rounded-full mb-2 tracking-wide">
+                  Solusi Bebas Antre Mahasiswa UYM
+                </span>
+                <h3 class="text-xl sm:text-2xl font-extrabold leading-tight">
+                  Waktu Istirahat Singkat? Pesan Makanan Sebelum Kelas Selesai!
+                </h3>
+                <p class="text-xs sm:text-sm text-blue-100 mt-2">
+                  Pilih menu favoritmu di Kantin UYM, bayar pakai QRIS / Saldo KTM, dan tinggal ambil di meja pick-up khusus tanpa perlu berdesakan.
+                </p>
+                <div class="mt-4 flex flex-wrap gap-2.5">
+                  <button onclick="navigateTo('katalog')" class="bg-white text-uym-navy hover:bg-slate-100 font-bold px-4 py-2 rounded-lg text-xs transition flex items-center space-x-1.5 shadow-sm">
+                    <i data-lucide="shopping-bag" class="w-4 h-4"></i>
+                    <span>Pesan Sekarang</span>
+                  </button>
+                  <button onclick="openModal('modal-info-uym')" class="bg-blue-800/60 hover:bg-blue-800 text-white font-medium px-4 py-2 rounded-lg text-xs transition border border-white/20">
+                    Pelajari Alur SiKantin
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- SECTION: REKOMENDASI TERLARIS (GRID VIEW) -->
+            <div class="space-y-4">
+              <div class="flex items-center justify-between">
+                <div>
+                  <h3 class="text-base font-bold text-slate-800 flex items-center space-x-1.5">
+                    <span>Menu Terlaris Hari Ini</span>
+                    <span class="bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-0.5 rounded-full">Favorit Mahasiswa</span>
+                  </h3>
+                  <p class="text-xs text-slate-500">Paling banyak dipesan jelang jam istirahat kuliah</p>
+                </div>
+              </div>
+
+              <div id="beranda-featured-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                <!-- Dynamically populated by renderFeaturedHome() -->
+              </div>
+            </div>
+
+            <!-- SECTION: INFO STAND KANTIN & JAM OPERASIONAL -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 pt-2">
+              
+              <!-- Stand List — INTERACTIVE (Add/Edit/Delete Tenant) -->
+              <div class="lg:col-span-2 bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm">
+                <div class="flex items-center justify-between mb-4">
+                  <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-2">
+                    <i data-lucide="map-pin" class="w-4 h-4 text-uym-royal"></i>
+                    <span>Daftar Tenant Kantin UYM</span>
+                  </h4>
+                  <div class="flex items-center space-x-2">
+                    <button onclick="openModal('modal-tambah-tenant')" class="flex items-center space-x-1 bg-uym-navy hover:bg-uym-royal text-white px-2.5 py-1.5 rounded-lg text-[11px] font-bold transition shadow-sm">
+                      <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                      <span>Tambah Tenant</span>
+                    </button>
+                  </div>
+                </div>
+                <div id="tenant-list-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <!-- Rendered by JS renderTenantList() -->
+                </div>
+              </div>
+              <!-- Jam Operasional Widget (Gaya Kalender LMS UYM) -->
+              <div class="bg-white rounded-xl border border-slate-200/80 p-5 shadow-sm flex flex-col justify-between">
+                <div>
+                  <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-2 mb-3">
+                    <i data-lucide="clock" class="w-4 h-4 text-uym-royal"></i>
+                    <span>Jam Operasional & Ambil</span>
+                  </h4>
+                  <div class="space-y-2 text-xs">
+                    <div class="flex items-center justify-between py-1.5 border-b border-slate-100">
+                      <span class="text-slate-500">Senin - Kamis</span>
+                      <span class="font-bold text-slate-800">07:30 - 16:30 WIB</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5 border-b border-slate-100">
+                      <span class="text-slate-500">Jumat</span>
+                      <span class="font-bold text-slate-800">07:30 - 15:30 WIB</span>
+                    </div>
+                    <div class="flex items-center justify-between py-1.5 border-b border-slate-100">
+                      <span class="text-slate-500">Sabtu (Kuliah Karyawan)</span>
+                      <span class="font-bold text-slate-800">08:00 - 14:00 WIB</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="mt-4 p-3 bg-amber-50 border border-amber-200/60 rounded-lg text-[11px] text-amber-800">
+                  <p class="font-bold flex items-center space-x-1">
+                    <i data-lucide="info" class="w-3.5 h-3.5"></i>
+                    <span>Tips Mahasiswa:</span>
+                  </p>
+                  <p class="mt-0.5">Pesan 15 menit sebelum dosen menutup perkuliahan agar makanan sudah siap di meja ambil tanpa antre!</p>
+                </div>
+              </div>
+
+            </div>
+
+          </section>
+
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 2: KATALOG MENU                               -->
+          <!-- ===================================================== -->
+          <section id="page-katalog" class="page-view hidden space-y-6">
+            
+            <div class="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm">
+              <h3 class="text-lg font-bold text-slate-800">Katalog Menu SiKantin UYM</h3>
+              <p class="text-xs text-slate-500 mt-1">Jelajahi semua makanan dan minuman dari seluruh tenant kantin kampus.</p>
+            </div>
+
+            <!-- Product Grid -->
+            <div id="catalog-product-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <!-- Dynamically populated by renderCatalogProducts() -->
+            </div>
+
+            <!-- Empty State -->
+            <div id="catalog-empty-state" class="hidden text-center py-16 bg-white rounded-xl border border-slate-200">
+              <i data-lucide="utensils" class="w-12 h-12 text-slate-300 mx-auto mb-2"></i>
+              <p class="text-base font-bold text-slate-700">Belum ada menu tersedia</p>
+              <p class="text-xs text-slate-400 mt-1">Silakan cek kembali nanti.</p>
+            </div>
+
+          </section>
+
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 3: DETAIL MENU (Interactive View / Sheet)     -->
+          <!-- ===================================================== -->
+          <section id="page-detail" class="page-view hidden max-w-4xl mx-auto space-y-6">
+            
+            <!-- Breadcrumb Navigation -->
+            <div class="flex items-center space-x-2 text-xs text-slate-500">
+              <button onclick="navigateTo('katalog')" class="hover:text-uym-navy flex items-center space-x-1">
+                <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+                <span>Kembali ke Katalog</span>
+              </button>
+              <span>/</span>
+              <span id="detail-breadcrumb-title" class="text-slate-800 font-semibold">Detail Menu</span>
+            </div>
+
+            <!-- Main Detail Card -->
+            <div class="bg-white rounded-2xl border border-slate-200/80 shadow-md overflow-hidden grid grid-cols-1 md:grid-cols-2">
+              
+              <!-- Left: Image Section -->
+              <div class="relative bg-slate-100 h-64 md:h-full min-h-[300px]">
+                <img id="detail-image" src="" alt="Menu Image" class="w-full h-full object-cover">
+                <div class="absolute top-3 left-3 bg-white/90 backdrop-blur-xs px-2.5 py-1 rounded-full text-xs font-bold text-slate-800 shadow-sm flex items-center space-x-1">
+                  <i data-lucide="star" class="w-3.5 h-3.5 text-amber-500 fill-amber-500"></i>
+                  <span id="detail-rating">4.8</span>
+                  <span class="text-slate-400 font-normal">(120+ ulasan)</span>
+                </div>
+                <div class="absolute bottom-3 left-3 bg-uym-navy text-white text-[11px] font-semibold px-3 py-1 rounded-full shadow-md flex items-center space-x-1">
+                  <i data-lucide="store" class="w-3 h-3"></i>
+                  <span id="detail-tenant">Kantin Bu Siti</span>
+                </div>
+              </div>
+
+              <!-- Right: Content & Customization Form -->
+              <div class="p-6 flex flex-col justify-between space-y-5">
+                <div>
+                  <div class="flex items-start justify-between">
+                    <div>
+                      <span id="detail-category-badge" class="text-[10px] uppercase font-bold text-uym-royal bg-blue-50 px-2 py-0.5 rounded-full">Makanan Berat</span>
+                      <h2 id="detail-name" class="text-xl sm:text-2xl font-extrabold text-slate-800 mt-1">Ayam Geprek Sambal Bawang</h2>
+                    </div>
+                  </div>
+
+                  <p id="detail-price-display" class="text-2xl font-black text-uym-navy mt-2">Rp 15.000</p>
+                  <p id="detail-desc" class="text-xs text-slate-600 mt-2 leading-relaxed">
+                    Ayam goreng krispi dengan racikan sambal bawang segar khas kantin kampus. Disajikan hangat lengkap dengan lalapan timun dan kemangi.
+                  </p>
+
+                  <div class="mt-4 pt-4 border-t border-slate-100 space-y-4">
+                    <div id="detail-customizations" class="space-y-4"></div>
+
+                    <!-- Catatan Khusus untuk Kantin -->
+                    <div>
+                      <label for="detail-notes" class="block text-xs font-bold text-slate-700 mb-1">Catatan tambahan (opsional):</label>
+                      <input type="text" id="detail-notes" placeholder="Contoh: saus dipisah, es sedikit..." class="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:ring-1 focus:ring-uym-royal focus:outline-none">
+                    </div>
+
+                  </div>
+                </div>
+
+                <!-- Bottom Action: Counter & Add to Cart -->
+                <div class="pt-4 border-t border-slate-100 flex items-center space-x-3">
+                  <!-- Quantity Counter -->
+                  <div class="flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2 py-1">
+                    <button onclick="updateDetailQty(-1)" class="w-7 h-7 flex items-center justify-center font-bold text-slate-600 hover:text-uym-navy hover:bg-white rounded transition">-</button>
+                    <span id="detail-qty-val" class="w-8 text-center font-bold text-sm text-slate-800">1</span>
+                    <button onclick="updateDetailQty(1)" class="w-7 h-7 flex items-center justify-center font-bold text-slate-600 hover:text-uym-navy hover:bg-white rounded transition">+</button>
+                  </div>
+
+                  <!-- Add to Cart Button -->
+                  <button onclick="confirmAddToCart()" class="flex-1 bg-uym-navy hover:bg-uym-royal text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-between shadow-md transition">
+                    <span class="flex items-center space-x-1.5">
+                      <i data-lucide="plus-circle" class="w-4 h-4"></i>
+                      <span>Tambah ke Keranjang</span>
+                    </span>
+                    <span id="detail-total-btn-price" class="font-black">Rp 15.000</span>
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+          </section>
+
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 4: KERANJANG BELANJA                          -->
+          <!-- ===================================================== -->
+          <section id="page-keranjang" class="page-view hidden max-w-4xl mx-auto space-y-6">
+            
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-xl font-extrabold text-slate-800">Keranjang Mahasiswa</h3>
+                <p class="text-xs text-slate-500">Cek kembali menu yang kamu pesan sebelum lanjut ke pembayaran</p>
+              </div>
+              <button onclick="navigateTo('katalog')" class="text-xs font-semibold text-uym-royal hover:underline flex items-center space-x-1">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Tambah Menu Lain</span>
+              </button>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              <!-- Left: Cart Items List -->
+              <div class="lg:col-span-2 space-y-3" id="cart-items-container">
+                <!-- Dynamically populated by renderCart() -->
+              </div>
+
+              <!-- Right: Order Summary & Voucher -->
+              <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md h-fit space-y-4">
+                <h4 class="text-sm font-bold text-slate-800 pb-2 border-b border-slate-100 flex items-center space-x-2">
+                  <i data-lucide="receipt" class="w-4 h-4 text-uym-royal"></i>
+                  <span>Ringkasan Belanja</span>
+                </h4>
+
+                <!-- Promo Voucher Input -->
+                <div class="space-y-1.5">
+                  <label class="block text-xs font-semibold text-slate-600">Kode Voucher Mahasiswa:</label>
+                  <div class="flex space-x-2">
+                    <input type="text" id="voucher-input" placeholder="Ketik UYMHEMAT" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs uppercase focus:outline-none focus:ring-1 focus:ring-uym-royal font-mono">
+                    <button onclick="applyVoucherCode()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition">Pakai</button>
+                  </div>
+                  <p id="voucher-status" class="text-[10px] text-slate-400">Gunakan kode <span class="font-bold text-uym-royal">UYMHEMAT</span> untuk diskon Rp 3.000!</p>
+                </div>
+
+                <!-- Price Calculations -->
+                <div class="space-y-2 text-xs pt-2 border-t border-slate-100">
+                  <div class="flex items-center justify-between text-slate-600">
+                    <span>Subtotal Menu</span>
+                    <span id="cart-subtotal" class="font-semibold text-slate-800">Rp 0</span>
+                  </div>
+                  <div class="flex items-center justify-between text-slate-600">
+                    <span>Diskon Voucher</span>
+                    <span id="cart-discount" class="font-semibold text-emerald-600">-Rp 0</span>
+                  </div>
+                  <div class="flex items-center justify-between text-slate-600">
+                    <span class="flex items-center space-x-1">
+                      <span>Biaya Layanan SiKantin</span>
+                      <span class="text-[10px] text-emerald-600 bg-emerald-50 px-1 rounded">Gratis Kampus</span>
+                    </span>
+                    <span class="font-semibold text-slate-800">Rp 0</span>
+                  </div>
+                </div>
+
+                <!-- Total Payment -->
+                <div class="pt-3 border-t border-slate-200 flex items-center justify-between">
+                  <div>
+                    <p class="text-xs text-slate-500 font-medium">Total Tagihan:</p>
+                    <p id="cart-total" class="text-xl font-black text-uym-navy">Rp 0</p>
+                  </div>
+                  <button onclick="proceedToCheckout()" id="btn-to-checkout" class="bg-uym-navy hover:bg-uym-royal text-white font-bold px-5 py-2.5 rounded-xl text-xs sm:text-sm shadow-md transition flex items-center space-x-1.5">
+                    <span>Lanjut Checkout</span>
+                    <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                  </button>
+                </div>
+
+              </div>
+
+            </div>
+
+            <!-- Empty Cart State -->
+            <div id="cart-empty-state" class="hidden text-center py-16 bg-white rounded-2xl border border-slate-200">
+              <div class="w-16 h-16 bg-blue-50 text-uym-royal rounded-full flex items-center justify-center mx-auto mb-3">
+                <i data-lucide="shopping-cart" class="w-8 h-8"></i>
+              </div>
+              <h4 class="text-base font-bold text-slate-700">Keranjang Masih Kosong</h4>
+              <p class="text-xs text-slate-500 mt-1 max-w-sm mx-auto">Yuk pilih menu favoritmu di katalog sebelum jam istirahat kuliah dimulai!</p>
+              <button onclick="navigateTo('katalog')" class="mt-4 px-5 py-2.5 bg-uym-navy text-white text-xs font-bold rounded-xl hover:bg-uym-royal transition shadow-sm">
+                Lihat Katalog Menu
+              </button>
+            </div>
+
+          </section>
+
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 5: CHECKOUT & METODE PEMBAYARAN               -->
+          <!-- ===================================================== -->
+          <section id="page-checkout" class="page-view hidden max-w-4xl mx-auto space-y-6">
+            
+            <!-- Breadcrumb Navigation -->
+            <div class="flex items-center space-x-2 text-xs text-slate-500">
+              <button onclick="navigateTo('keranjang')" class="hover:text-uym-navy flex items-center space-x-1">
+                <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i>
+                <span>Kembali ke Keranjang</span>
+              </button>
+              <span>/</span>
+              <span class="text-slate-800 font-semibold">Checkout SiKantin</span>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              <!-- Left: Form Checkout (Data Mahasiswa, Waktu Pengambilan, Metode Bayar) -->
+              <div class="lg:col-span-2 space-y-4">
+                
+                <!-- Card 1: Data Identitas Pemesan (Auto-filled from LMS) -->
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">
+                  <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+                    <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-2">
+                      <i data-lucide="user-check" class="w-4 h-4 text-uym-royal"></i>
+                      <span>Data Pemesan Mahasiswa UYM</span>
+                    </h4>
+                    <span class="text-[10px] bg-blue-50 text-uym-royal font-bold px-2 py-0.5 rounded-full">Otomatis dari LMS</span>
+                  </div>
+                  
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <span class="text-slate-500 block">Nama Lengkap:</span>
+                      <p class="font-bold text-slate-800 text-sm">Nanda Yudhistira Wibowo</p>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block">NIM / Kelas:</span>
+                      <p class="font-bold text-slate-800 text-sm">221055201001 &bull; AP2405A</p>
+                    </div>
+                    <div>
+                      <span class="text-slate-500 block">Program Studi:</span>
+                      <p class="font-semibold text-slate-700">Teknik Informatika &bull; FST</p>
+                    </div>
+                    <div>
+                      <label for="checkout-wa" class="text-slate-500 block">Nomor WhatsApp (Notifikasi):</label>
+                      <input type="text" id="checkout-wa" value="0858-1234-5678" class="font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded px-2 py-1 text-xs w-full mt-0.5">
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Card 2: Waktu & Titik Ambil (Kunci Tagline: Pesan Dulu, Ambil Tanpa Antre) -->
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">
+                  <div class="pb-2 border-b border-slate-100">
+                    <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-2">
+                      <i data-lucide="clock" class="w-4 h-4 text-uym-royal"></i>
+                      <span>Pilih Waktu Pengambilan Makanan</span>
+                    </h4>
+                    <p class="text-xs text-slate-500 mt-0.5">Makanan akan disiapkan tepat pada waktu yang kamu pilih</p>
+                  </div>
+
+                  <div class="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <label class="cursor-pointer border border-slate-200 rounded-xl p-3 text-xs has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50 transition block">
+                      <input type="radio" name="pickup-time" value="Segera (sesuai estimasi menu)" checked class="sr-only">
+                      <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-800">Segera</span>
+                        <i data-lucide="zap" class="w-3.5 h-3.5 text-amber-500"></i>
+                      </div>
+                      <p class="text-[11px] text-slate-500 mt-1">Perkiraan waktu tampil di ringkasan</p>
+                    </label>
+
+                    <label class="cursor-pointer border border-slate-200 rounded-xl p-3 text-xs has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50 transition block">
+                      <input type="radio" name="pickup-time" value="Istirahat Siang (11:45 WIB)" class="sr-only">
+                      <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-800">Jam 11:45 WIB</span>
+                        <i data-lucide="sun" class="w-3.5 h-3.5 text-orange-500"></i>
+                      </div>
+                      <p class="text-[11px] text-slate-500 mt-1">Selesai Matkul Pagi</p>
+                    </label>
+
+                    <label class="cursor-pointer border border-slate-200 rounded-xl p-3 text-xs has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50 transition block">
+                      <input type="radio" name="pickup-time" value="Istirahat Dzuhur (12:30 WIB)" class="sr-only">
+                      <div class="flex items-center justify-between">
+                        <span class="font-bold text-slate-800">Jam 12:30 WIB</span>
+                        <i data-lucide="coffee" class="w-3.5 h-3.5 text-blue-500"></i>
+                      </div>
+                      <p class="text-[11px] text-slate-500 mt-1">Istirahat Sholat/Makan</p>
+                    </label>
+                  </div>
+
+                  <!-- Lokasi Ambil -->
+                  <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                    <span class="text-slate-500">Lokasi Titik Pengambilan (Pick-up Point):</span>
+                    <span class="font-bold text-uym-navy bg-uym-soft px-2.5 py-1 rounded-md flex items-center space-x-1">
+                      <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
+                      <span>Meja SiKantin Gedung Utama UYM</span>
+                    </span>
+                  </div>
+                </div>
+
+                <!-- Card 3: Pilihan Metode Pembayaran -->
+                <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm space-y-3">
+                  <div class="pb-2 border-b border-slate-100">
+                    <h4 class="text-sm font-bold text-slate-800 flex items-center space-x-2">
+                      <i data-lucide="credit-card" class="w-4 h-4 text-uym-royal"></i>
+                      <span>Metode Pembayaran</span>
+                    </h4>
+                  </div>
+
+                  <div class="space-y-2">
+                    <!-- Method 1: QRIS -->
+                    <label class="flex items-center justify-between p-3.5 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50/70 transition">
+                      <div class="flex items-center space-x-3">
+                        <input type="radio" name="payment-method" value="QRIS Dinamis" checked class="text-uym-navy focus:ring-uym-royal">
+                        <div>
+                          <p class="text-xs font-bold text-slate-800 flex items-center space-x-2">
+                            <span>QRIS Instan Kampus</span>
+                            <span class="bg-red-100 text-red-700 text-[9px] font-bold px-1.5 py-0.5 rounded">Rekomendasi</span>
+                          </p>
+                          <p class="text-[10px] text-slate-500">BCA, Mandiri, Gopay, Dana, OVO, ShopeePay</p>
+                        </div>
+                      </div>
+                      <i data-lucide="qr-code" class="w-5 h-5 text-slate-600"></i>
+                    </label>
+
+                    <!-- Method 2: Saldo Mahasiswa UYM -->
+                    <label class="flex items-center justify-between p-3.5 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50/70 transition">
+                      <div class="flex items-center space-x-3">
+                        <input type="radio" name="payment-method" value="Saldo KTM Mahasiswa" class="text-uym-navy focus:ring-uym-royal">
+                        <div>
+                          <p class="text-xs font-bold text-slate-800 flex items-center space-x-2">
+                            <span>Saldo KTM Mahasiswa UYM</span>
+                            <span data-ktm-saldo class="bg-emerald-100 text-emerald-700 text-[9px] font-bold px-1.5 py-0.5 rounded">Sisa: Rp 0</span>
+                          </p>
+                          <p class="text-[10px] text-slate-500">Pembayaran sekali klik langsung terpotong dari akun LMS</p>
+                        </div>
+                      </div>
+                      <i data-lucide="wallet" class="w-5 h-5 text-emerald-600"></i>
+                    </label>
+
+                    <!-- Method 3: Tunai di Counter SiKantin -->
+                    <label class="flex items-center justify-between p-3.5 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50/70 transition">
+                      <div class="flex items-center space-x-3">
+                        <input type="radio" name="payment-method" value="Bayar Tunai di Counter" class="text-uym-navy focus:ring-uym-royal">
+                        <div>
+                          <p class="text-xs font-bold text-slate-800">Bayar Tunai di Counter SiKantin</p>
+                          <p class="text-[10px] text-slate-500">Bayar cash saat mengambil pesanan di meja khusus</p>
+                        </div>
+                      </div>
+                      <i data-lucide="banknote" class="w-5 h-5 text-slate-500"></i>
+                    </label>
+                  </div>
+                </div>
+
+              </div>
+
+              <!-- Right: Checkout Summary -->
+              <div class="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-md h-fit space-y-4">
+                <h4 class="text-sm font-bold text-slate-800 pb-2 border-b border-slate-100 flex items-center space-x-2">
+                  <i data-lucide="file-text" class="w-4 h-4 text-uym-royal"></i>
+                  <span>Detail Pembayaran</span>
+                </h4>
+
+                <div id="checkout-mini-list" class="space-y-2 text-xs max-h-48 overflow-y-auto pr-1">
+                  <!-- Injected from JS -->
+                </div>
+
+                <div id="checkout-prep-estimate" class="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-[11px] text-uym-navy" aria-live="polite">
+                  Tambahkan menu untuk melihat perkiraan waktu penyiapan.
+                </div>
+
+                <div class="space-y-2 text-xs pt-3 border-t border-slate-100">
+                  <div class="flex items-center justify-between text-slate-600">
+                    <span>Subtotal</span>
+                    <span id="checkout-subtotal" class="font-semibold text-slate-800">Rp 0</span>
+                  </div>
+                  <div class="flex items-center justify-between text-slate-600">
+                    <span>Diskon</span>
+                    <span id="checkout-discount" class="font-semibold text-emerald-600">-Rp 0</span>
+                  </div>
+                  <div class="flex items-center justify-between text-slate-600">
+                    <span>Biaya Layanan</span>
+                    <span class="font-semibold text-emerald-600">Gratis (UYM)</span>
+                  </div>
+                  <div class="pt-2 border-t border-slate-200 flex items-center justify-between">
+                    <span class="font-bold text-slate-800">Total Tagihan:</span>
+                    <span id="checkout-total-price" class="text-lg font-black text-uym-navy">Rp 0</span>
+                  </div>
+                </div>
+
+                <!-- Submit Button -->
+                <button onclick="handlePlaceOrder()" class="w-full bg-gradient-to-r from-uym-navy to-uym-royal hover:from-uym-dark hover:to-uym-blue text-white font-bold py-3 px-4 rounded-xl text-xs sm:text-sm shadow-md transition flex items-center justify-center space-x-2">
+                  <i data-lucide="check-circle" class="w-4 h-4"></i>
+                  <span>Konfirmasi & Buat Pesanan</span>
+                </button>
+
+                <p class="text-[10px] text-slate-400 text-center">
+                  Dengan mengklik tombol di atas, pesanan akan diteruskan ke tenant dan antrean digital akan dibuat.
+                </p>
+              </div>
+
+            </div>
+
+          </section>
+
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 6: STATUS PESANAN (Live Tracking Stepper)     -->
+          <!-- ===================================================== -->
+          <section id="page-status" class="page-view hidden max-w-4xl mx-auto space-y-6">
+            
+            <!-- Page Header -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 id="status-page-title" class="text-xl font-extrabold text-slate-800">Status Pesanan</h3>
+                <p id="status-page-description" class="text-xs text-slate-500">Status pesanan checkout diperbarui otomatis setiap 5 detik.</p>
+              </div>
+
+              <button id="status-demo-advance-btn" onclick="advanceOrderSimulation()" class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-bold px-3 py-1.5 rounded-xl text-xs transition flex items-center space-x-1.5 shadow-xs">
+                <i data-lucide="play" class="w-3.5 h-3.5 fill-amber-800 text-amber-800"></i>
+                <span>Majukan Status Demo</span>
+              </button>
+            </div>
+
+            <div id="status-empty-state" class="hidden bg-white border border-slate-200 rounded-2xl p-8 text-center shadow-sm">
+              <div class="w-12 h-12 bg-blue-50 text-uym-royal rounded-full flex items-center justify-center mx-auto">
+                <i data-lucide="clipboard-list" class="w-6 h-6"></i>
+              </div>
+              <h4 class="mt-3 text-sm font-bold text-slate-800">Anda belum memiliki pesanan aktif</h4>
+              <p class="mt-1 text-xs text-slate-500">Silakan pesan menu terlebih dahulu. Pesanan yang sudah selesai dapat dilihat kembali di Riwayat Pesanan.</p>
+              <button onclick="navigateTo('katalog')" class="mt-4 px-4 py-2 bg-uym-navy text-white rounded-lg text-xs font-bold hover:bg-uym-royal transition">Pilih Menu</button>
+              <button onclick="navigateTo('history')" class="mt-4 sm:mt-0 sm:ml-2 px-4 py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-bold hover:bg-slate-200 transition">Lihat Riwayat Pesanan</button>
+            </div>
+
+            <!-- Active Order Card -->
+            <div id="status-order-content" class="hidden bg-white rounded-2xl border border-slate-200/80 shadow-md overflow-hidden">
+              
+              <!-- Ticket Header with Big Queue Number -->
+              <div class="bg-gradient-to-r from-uym-navy via-uym-royal to-uym-blue text-white p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div class="flex items-center space-x-2">
+                    <span class="bg-white/20 text-blue-100 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">Tiket SiKantin UYM</span>
+                    <span id="order-mode-badge" class="bg-white/20 text-blue-100 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">Demo</span>
+                    <span id="order-id-label" class="text-xs font-mono text-blue-200">#SKT-20261021-042</span>
+                  </div>
+                  <h4 id="status-tenant-label" class="text-xl font-black mt-1">Kantin Bu Siti</h4>
+                  <p class="text-xs text-blue-100 mt-0.5 flex items-center space-x-1">
+                    <i data-lucide="map-pin" class="w-3.5 h-3.5"></i>
+                    <span id="status-pickup-location">Meja Pick-up SiKantin Lt. 1 Gedung Utama</span>
+                  </p>
+                </div>
+
+                <!-- Big Queue Number Display -->
+                <div class="bg-white text-slate-900 rounded-2xl px-6 py-3 text-center shadow-lg border-2 border-amber-400 self-start sm:self-auto">
+                  <p class="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest">Nomor Antrean</p>
+                  <p id="queue-number-display" class="text-3xl sm:text-4xl font-black text-uym-navy tracking-tight">A-14</p>
+                  <p class="text-[10px] text-emerald-600 font-bold mt-0.5 flex items-center justify-center space-x-1">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-ping"></span>
+                    <span id="queue-eta-badge">Estimasi 8 Menit</span>
+                  </p>
+                </div>
+              </div>
+
+              <!-- Live Stepper Progress (4 Tahapan) -->
+              <div class="p-6 bg-slate-50/50 border-b border-slate-100">
+                <p class="text-xs font-bold text-slate-700 mb-4">Progres Penyiapan Makanan:</p>
+                
+                <div class="grid grid-cols-4 gap-2 relative">
+                  <!-- Stepper Step 1: Diterima -->
+                  <div id="step-node-1" class="step-node text-center">
+                    <div class="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto mb-1.5 shadow-sm">
+                      <i data-lucide="check" class="w-5 h-5"></i>
+                    </div>
+                    <p class="text-xs font-bold text-slate-800">1. Diterima</p>
+                    <p class="text-[10px] text-slate-400 hidden sm:block">Kantin menyetujui</p>
+                  </div>
+
+                  <!-- Stepper Step 2: Dimasak -->
+                  <div id="step-node-2" class="step-node text-center">
+                    <div class="w-10 h-10 rounded-full bg-uym-royal text-white flex items-center justify-center mx-auto mb-1.5 shadow-sm animate-bounce">
+                      <i data-lucide="flame" class="w-5 h-5"></i>
+                    </div>
+                    <p class="text-xs font-bold text-uym-navy">2. Dimasak</p>
+                    <p class="text-[10px] text-uym-royal font-medium hidden sm:block">Penjual menyiapkan pesanan</p>
+                  </div>
+
+                  <!-- Stepper Step 3: Siap Diambil -->
+                  <div id="step-node-3" class="step-node text-center opacity-40">
+                    <div class="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center mx-auto mb-1.5 shadow-sm">
+                      <i data-lucide="bell" class="w-5 h-5"></i>
+                    </div>
+                    <p class="text-xs font-bold text-slate-600">3. Siap Diambil</p>
+                    <p class="text-[10px] text-slate-400 hidden sm:block">Di Meja SiKantin</p>
+                  </div>
+
+                  <!-- Stepper Step 4: Selesai -->
+                  <div id="step-node-4" class="step-node text-center opacity-40">
+                    <div class="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center mx-auto mb-1.5 shadow-sm">
+                      <i data-lucide="award" class="w-5 h-5"></i>
+                    </div>
+                    <p class="text-xs font-bold text-slate-600">4. Selesai</p>
+                    <p class="text-[10px] text-slate-400 hidden sm:block">Makanan dinikmati</p>
+                  </div>
+                </div>
+
+                <!-- Status Live Banner -->
+                <div id="status-live-banner" class="mt-6 p-4 rounded-xl bg-blue-50 border border-blue-200 flex items-center justify-between">
+                  <div class="flex items-center space-x-3">
+                    <div class="w-3 h-3 rounded-full bg-uym-royal animate-ping"></div>
+                    <div>
+                      <p id="status-headline" class="text-xs font-bold text-uym-navy">Tenant sedang memasak pesanan kamu...</p>
+                      <p id="status-subtext" class="text-[11px] text-slate-600">Perkiraan siap pukul 11:45 WIB. Silakan santai di kelas atau menuju kantin.</p>
+                    </div>
+                  </div>
+                  <button id="status-demo-step-btn" onclick="advanceOrderSimulation()" class="hidden text-xs font-bold text-uym-royal bg-white px-3 py-1.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition">
+                    Majukan Demo
+                  </button>
+                </div>
+              </div>
+
+              <!-- Order Details & QR Code Verifikasi -->
+              <div class="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+                <!-- QR Code Verification Section -->
+                <div class="text-center p-4 bg-slate-50 rounded-xl border border-slate-200 flex flex-col items-center justify-center">
+                  <!-- Simulated Canvas / SVG QR Code -->
+                  <div class="p-2 bg-white rounded-lg border border-slate-300 shadow-xs mb-2">
+                    <img id="status-order-qr" src="https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=SIKANTIN-UYM-A14" alt="QR Code Pengambilan" class="w-32 h-32 object-contain" onerror="this.src='logo-uym.png'">
+                  </div>
+                  <p class="text-xs font-bold text-slate-700">QR Code Pengambilan</p>
+                  <p class="text-[10px] text-slate-400 mt-0.5">Tunjukkan ke petugas counter SiKantin</p>
+                </div>
+
+                <!-- Items Ordered in this ticket -->
+                <div class="md:col-span-2 space-y-3">
+                  <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Item dalam Pesanan Ini:</h5>
+                  <div id="status-items-list" class="space-y-2 text-xs">
+                    <!-- Dynamic -->
+                  </div>
+
+                  <div class="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-800">
+                    <span>Metode Bayar: <span id="status-payment-badge" class="font-normal text-uym-royal">QRIS (Lunas)</span></span>
+                    <span>Total: <span id="status-total-badge" class="text-base text-uym-navy font-black">Rp 15.000</span></span>
+                  </div>
+
+                  <!-- Actions -->
+                  <div class="pt-2 flex flex-wrap gap-2">
+                    <button onclick="navigateTo('katalog')" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition">
+                      Pesan Tambahan
+                    </button>
+                    <button id="status-cancel-order-btn" onclick="cancelOrder(state.activeOrder && state.activeOrder.id)" class="hidden px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition">
+                      Batalkan Pesanan
+                    </button>
+                    <button onclick="openModal('modal-info-uym')" class="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-uym-navy rounded-lg text-xs font-bold transition">
+                      Bantuan / Komplain
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+
+          </section>
+
+          <!-- ===================================================== -->
+          <!-- HALAMAN 7: RIWAYAT PESANAN                            -->
+          <!-- ===================================================== -->
+          <section id="page-history" class="page-view hidden max-w-4xl mx-auto space-y-6">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h3 class="text-xl font-extrabold text-slate-800">Riwayat Pesanan</h3>
+                <p class="text-xs text-slate-500 mt-1">Klik detail untuk melihat status, pembayaran, dan pembatalan pesanan.</p>
+              </div>
+              <button onclick="navigateTo('status')" class="shrink-0 text-xs font-semibold text-uym-royal hover:underline flex items-center space-x-1">
+                <i data-lucide="clock" class="w-3.5 h-3.5"></i>
+                <span>Status Pesanan</span>
+              </button>
+            </div>
+
+            <div id="order-history-list" class="space-y-3"></div>
+          </section>
+
+
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+
+  <section id="home-active-order-card" class="hidden fixed z-30 bottom-24 lg:bottom-6 right-3 sm:right-6 w-[calc(100%-1.5rem)] max-w-sm bg-white rounded-2xl border border-blue-100 shadow-2xl overflow-hidden animate-in slide-in-from-bottom-3 duration-300" aria-live="polite" aria-label="Ringkasan pesanan aktif">
+    <div class="p-4">
+      <div class="flex items-start gap-3">
+        <div class="w-11 h-11 shrink-0 rounded-xl bg-uym-soft text-uym-navy flex items-center justify-center">
+          <i data-lucide="shopping-bag" class="w-5 h-5"></i>
+        </div>
+        <div class="min-w-0 flex-1">
+          <div class="flex items-center justify-between gap-2">
+            <p class="text-[10px] font-bold uppercase tracking-wide text-slate-500">Lacak pesanan</p>
+            <span class="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              Aktif
+            </span>
+          </div>
+          <h3 id="home-active-order-status" class="text-sm font-extrabold text-slate-800 mt-0.5">Pesanan diterima</h3>
+          <p class="text-[10px] text-slate-500 mt-0.5">Antrean <span id="home-active-order-queue" class="font-bold text-slate-700"></span> · <span id="home-active-order-id" class="font-mono"></span></p>
+        </div>
+      </div>
+      <div class="mt-3 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <div id="home-active-order-progress" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width: 25%"></div>
+      </div>
+      <div class="mt-3 flex items-center justify-between gap-3">
+        <p id="home-active-order-items" class="text-[10px] text-slate-600 truncate"></p>
+        <button type="button" onclick="navigateTo('status')" class="shrink-0 inline-flex items-center gap-1 text-[11px] font-bold text-uym-royal hover:text-uym-navy transition">
+          Lihat status
+          <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+        </button>
+      </div>
+      <p id="home-active-order-note" class="sr-only">Status pesanan diperbarui otomatis setiap 5 detik.</p>
+    </div>
+  </section>
+
+  <!-- ======================================================== -->
+  <!-- 4. MOBILE BOTTOM NAVIGATION BAR                          -->
+  <!-- ======================================================== -->
+  <nav class="lg:hidden fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 z-40 px-3 py-2 flex items-center justify-around shadow-lg">
+    <button onclick="navigateTo('beranda')" id="mobile-nav-beranda" class="mobile-nav-btn flex flex-col items-center text-uym-navy">
+      <i data-lucide="home" class="w-5 h-5"></i>
+      <span class="text-[10px] font-bold mt-1">Beranda</span>
+    </button>
+    <button onclick="navigateTo('katalog')" id="mobile-nav-katalog" class="mobile-nav-btn flex flex-col items-center text-slate-500 hover:text-uym-navy">
+      <i data-lucide="utensils" class="w-5 h-5"></i>
+      <span class="text-[10px] font-medium mt-1">Katalog</span>
+    </button>
+    <button onclick="navigateTo('keranjang')" id="mobile-nav-keranjang" class="mobile-nav-btn relative flex flex-col items-center text-slate-500 hover:text-uym-navy">
+      <i data-lucide="shopping-cart" class="w-5 h-5"></i>
+      <span id="mobile-cart-badge" class="absolute -top-1 -right-1 bg-uym-royal text-white text-[9px] font-bold w-4 h-4 rounded-full flex items-center justify-center">0</span>
+      <span class="text-[10px] font-medium mt-1">Keranjang</span>
+    </button>
+    <button onclick="navigateTo('status')" id="mobile-nav-status" class="mobile-nav-btn flex flex-col items-center text-slate-500 hover:text-uym-navy">
+      <i data-lucide="activity" class="w-5 h-5"></i>
+      <span class="text-[10px] font-medium mt-1">Status</span>
+    </button>
+    <button onclick="navigateTo('demo')" id="mobile-nav-demo" class="mobile-nav-btn flex flex-col items-center text-slate-500 hover:text-uym-navy">
+      <i data-lucide="clock" class="w-5 h-5"></i>
+      <span class="text-[10px] font-medium mt-1">Demo</span>
+    </button>
+    <button onclick="navigateTo('history')" id="mobile-nav-history" class="mobile-nav-btn flex flex-col items-center text-slate-500 hover:text-uym-navy">
+      <i data-lucide="receipt-text" class="w-5 h-5"></i>
+      <span class="text-[10px] font-medium mt-1">Riwayat</span>
+    </button>
+  </nav>
+
+  <!-- ======================================================== -->
+  <!-- 5. QRIS PAYMENT SIMULATION MODAL                         -->
+  <!-- ======================================================== -->
+  <div id="modal-qris" class="fixed inset-0 z-50 modal-backdrop hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full p-6 text-center space-y-4 shadow-2xl animate-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <div class="flex items-center space-x-1.5">
+          <span class="font-extrabold text-sm text-uym-navy">QRIS Dinamis</span>
+          <span class="text-[10px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">SiKantin UYM</span>
+        </div>
+        <button onclick="closeModal('modal-qris')" class="p-1 rounded-full hover:bg-slate-100 text-slate-400">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="p-4 bg-slate-50 rounded-2xl border border-slate-200 inline-block mx-auto">
+        <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=SIKANTIN-PAYMENT-MEMBER-UYM" alt="QRIS Code" class="w-44 h-44 object-contain mx-auto" onerror="this.src='logo-uym.png'">
+        <p class="text-[11px] font-mono font-bold text-slate-600 mt-2">NMID: ID1020261021UYM</p>
+      </div>
+
+      <div>
+        <p class="text-xs text-slate-500">Total Nominal Pembayaran:</p>
+        <p id="qris-amount-display" class="text-2xl font-black text-uym-navy">Rp 15.000</p>
+      </div>
+
+      <p class="text-[11px] text-slate-500 leading-tight">
+        Buka aplikasi m-Banking (BCA, Mandiri, BRI) atau e-Wallet kamu, lalu pindai QRIS di atas.
+      </p>
+
+      <button onclick="completePaymentSimulation()" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl text-xs transition shadow-sm flex items-center justify-center space-x-1.5">
+        <i data-lucide="check" class="w-4 h-4"></i>
+        <span>Simulasikan Pembayaran Berhasil</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 6. INFO & BANTUAN MODAL                                  -->
+  <!-- ======================================================== -->
+  <div id="modal-info-uym" class="fixed inset-0 z-50 modal-backdrop hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div class="flex items-center space-x-2">
+          <img src="logo-uym.png" alt="Logo UYM" class="w-7 h-7 object-contain">
+          <h4 class="font-extrabold text-sm text-uym-navy">Tentang SiKantin Universitas Yatsi Madani</h4>
+        </div>
+        <button onclick="closeModal('modal-info-uym')" class="p-1 rounded-full hover:bg-slate-100 text-slate-400">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <div class="space-y-3 text-xs text-slate-600 leading-relaxed max-h-[70vh] overflow-y-auto pr-1">
+        <div class="p-3 bg-uym-soft rounded-xl border border-blue-200/60">
+          <p class="font-bold text-uym-navy">Tagline Resmi:</p>
+          <p class="text-sm font-extrabold text-uym-royal italic">“Pesan dulu, ambil tanpa antre.”</p>
+          <p class="text-[11px] text-slate-600 mt-1">
+            SiKantin dirancang untuk memecahkan masalah antrean panjang saat jeda kuliah 15 menit di Universitas Yatsi Madani.
+          </p>
+        </div>
+
+        <div class="p-3 bg-amber-50 rounded-xl border border-amber-200">
+          <h5 class="font-bold text-slate-800 mb-1">Dasar Perancangan dari Kuesioner Kelompok 3</h5>
+          <p class="text-[11px] text-slate-600">Dari 7 responden, 71,4% mendukung pre-order dan 71,4% menganggap kepastian waktu penyiapan penting. Karena itu katalog menampilkan estimasi menu sebelum checkout, status pesanan dapat dipantau, dan nomor antrean ditampilkan untuk pengambilan. Sebanyak 71,4% juga memilih akses Mobile Web tanpa instalasi.</p>
+          <p class="text-[10px] text-slate-500 mt-1">Angka ini merupakan hasil awal kuesioner dengan jumlah responden terbatas, bukan gambaran seluruh mahasiswa UYM.</p>
+        </div>
+
+        <div>
+          <h5 class="font-bold text-slate-800 mb-1">Alur Pemesanan (6 Halaman MVP):</h5>
+          <ol class="list-decimal list-inside space-y-1 text-slate-600">
+            <li><strong>Beranda:</strong> Ringkasan saldo, pesanan aktif, jam buka, dan menu favorit.</li>
+            <li><strong>Katalog:</strong> Eksplorasi menu makanan berat, minuman, snack per tenant.</li>
+            <li><strong>Detail Menu:</strong> Kustomisasi level pedas, topping telur/kerupuk, dan catatan khusus.</li>
+            <li><strong>Keranjang:</strong> Perhitungan harga, diskon voucher kampus, dan catatan pesanan.</li>
+            <li><strong>Checkout:</strong> Pemilihan jam ambil (saat kelas usai) dan pembayaran QRIS/KTM.</li>
+            <li><strong>Simulasi Pemesanan:</strong> Demo dapat dimajukan manual; status checkout berubah otomatis setiap 5 detik untuk keperluan demonstrasi.</li>
+          </ol>
+        </div>
+
+        <div>
+          <h5 class="font-bold text-slate-800 mb-1">Informasi Pengembang Tugas:</h5>
+          <p><strong>Nama:</strong> Nanda Yudhistira Wibowo</p>
+          <p><strong>Mata Kuliah:</strong> IKM503 - Desain UI/UX (Semester 5)</p>
+          <p><strong>Dosen Pengampu:</strong> Muhammad Arba Adirandi, S.Kom., M.T.I</p>
+          <p><strong>Kampus:</strong> Universitas Yatsi Madani (UYM)</p>
+        </div>
+      </div>
+
+      <button onclick="closeModal('modal-info-uym')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold py-2 rounded-xl text-xs transition">
+        Tutup Informasi
+      </button>
+    </div>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-box" class="fixed bottom-20 lg:bottom-6 right-6 z-50 pointer-events-none space-y-2">
+    <!-- Injected dynamically -->
+  </div>
+
+
+  <!-- ======================================================== -->
+  <!-- 7. APPLICATION LOGIC & DATASET (Vanilla JavaScript)     -->
+  <!-- ======================================================== -->
+  <script>
+    // --- DATABASE MENU KANTIN UYM ---
+    const MENU_DATABASE = [
+      {
+        id: 'm1',
+        name: 'Ayam Geprek Sambal Bawang UYM',
+        category: 'Makanan',
+        tenant: 'Kantin Bu Siti',
+        price: 15000,
+        rating: 4.9,
+        time: '9 Mnt',
+        image: 'https://images.unsplash.com/photo-1626082927389-6cd097cdc6ec?auto=format&fit=crop&w=600&q=80',
+        desc: 'Ayam goreng renyah digeprek dengan sambal bawang cabai rawit pedas segar, disajikan dengan nasi hangat dan lalapan mentimun.',
+        customizationGroups: [
+          { title: 'Level Sambal', type: 'radio', options: [
+            { label: 'Tidak pedas' }, { label: 'Sedang' }, { label: 'Pedas nampol' }
+          ] },
+          { title: 'Tambahan untuk Ayam Geprek', type: 'checkbox', options: [
+            { label: 'Telur dadar / ceplok', price: 3500 }, { label: 'Kerupuk kaleng', price: 1000 }
+          ] }
+        ],
+        featured: true
+      },
+      {
+        id: 'm2',
+        name: 'Nasi Goreng Spesial Kampus',
+        category: 'Makanan',
+        tenant: 'Kantin Bu Siti',
+        price: 14000,
+        rating: 4.8,
+        time: '8 Mnt',
+        image: 'https://images.unsplash.com/photo-1603133872878-684f208fb84b?auto=format&fit=crop&w=600&q=80',
+        desc: 'Nasi goreng bumbu racik khas kantin dengan suwiran ayam, sosis, bakso, dan taburan bawang goreng harum.',
+        customizationGroups: [
+          { title: 'Level Pedas', type: 'radio', options: [
+            { label: 'Tidak pedas' }, { label: 'Sedang' }, { label: 'Pedas' }
+          ] },
+          { title: 'Tambahan Nasi Goreng', type: 'checkbox', options: [
+            { label: 'Telur ceplok', price: 3500 }, { label: 'Sosis ekstra', price: 3000 }, { label: 'Kerupuk', price: 1000 }
+          ] }
+        ],
+        featured: true
+      },
+      {
+        id: 'm4',
+        name: 'Es Teh Manis Jumbo Solo',
+        category: 'Minuman',
+        tenant: 'Kopi & Minuman Kampus',
+        price: 4000,
+        rating: 4.9,
+        time: '3 Mnt',
+        image: 'https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&w=600&q=80',
+        desc: 'Teh melati racikan Solo ukuran jumbo dengan es batu melimpah, dingin dan menyegarkan dahaga setelah kuliah panjang.',
+        customizationGroups: [
+          { title: 'Tingkat Gula', type: 'radio', options: [
+            { label: 'Normal' }, { label: 'Sedikit gula' }, { label: 'Tanpa gula' }
+          ] },
+          { title: 'Es Batu', type: 'radio', options: [
+            { label: 'Es normal' }, { label: 'Es sedikit' }, { label: 'Tanpa es' }
+          ] },
+          { title: 'Tambahan Minuman', type: 'checkbox', options: [
+            { label: 'Lemon', price: 2000 }, { label: 'Selasih', price: 1500 }
+          ] }
+        ],
+        featured: true
+      },
+      {
+        id: 'm5',
+        name: 'Kopi Susu Gula Aren Madani',
+        category: 'Minuman',
+        tenant: 'Kopi & Minuman Kampus',
+        price: 10000,
+        rating: 4.8,
+        time: '4 Mnt',
+        image: 'https://images.unsplash.com/photo-1517701550927-30cf4ba1dba5?auto=format&fit=crop&w=600&q=80',
+        desc: 'Espresso blend lokal berpadu susu segar gurih dan pemanis gula aren alami. Teman terbaik nugas di perpustakaan UYM.',
+        customizationGroups: [
+          { title: 'Tingkat Gula Aren', type: 'radio', options: [
+            { label: 'Normal' }, { label: 'Sedikit gula' }, { label: 'Tanpa gula aren' }
+          ] },
+          { title: 'Es Batu', type: 'radio', options: [
+            { label: 'Es normal' }, { label: 'Es sedikit' }, { label: 'Tanpa es' }
+          ] },
+          { title: 'Tambahan Kopi', type: 'checkbox', options: [
+            { label: 'Extra espresso shot', price: 5000 }, { label: 'Boba', price: 4000 }
+          ] }
+        ],
+        featured: false
+      },
+      {
+        id: 'm6',
+        name: 'Siomay Bandung Komplit (5 Pcs)',
+        category: 'Snack',
+        tenant: 'Dapur Yatsi Ceria',
+        price: 13000,
+        rating: 4.7,
+        time: '5 Mnt',
+        image: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=600&q=80',
+        desc: 'Siomay ikan tenggiri asli, tahu bakso, kentang, dan kol disiram bumbu kacang kental gurih serta kecap manis dan jeruk limau.',
+        customizationGroups: [
+          { title: 'Saus Siomay', type: 'radio', options: [
+            { label: 'Saus kacang biasa' }, { label: 'Saus kacang pedas' }, { label: 'Saus dipisah' }
+          ] },
+          { title: 'Tambahan Siomay', type: 'checkbox', options: [
+            { label: 'Siomay ikan (1 pcs)', price: 3000 }, { label: 'Telur', price: 3500 }, { label: 'Kentang', price: 2500 }
+          ] }
+        ],
+        featured: false
+      },
+      {
+        id: 'm7',
+        name: 'Paket Hemat: Nasi Pecel + Telur',
+        category: 'Paket Hemat',
+        tenant: 'Kantin Bu Siti',
+        price: 13000,
+        rating: 4.8,
+        time: '5 Mnt',
+        image: 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
+        desc: 'Nasi pulen dengan aneka sayuran rebus disiram bumbu pecel Madiun pedas manis, lengkap dengan telur dadar dan rempeyek renyah.',
+        customizationGroups: [
+          { title: 'Level Pedas Bumbu Pecel', type: 'radio', options: [
+            { label: 'Tidak pedas' }, { label: 'Sedang' }, { label: 'Pedas' }
+          ] },
+          { title: 'Tambahan Paket Pecel', type: 'checkbox', options: [
+            { label: 'Nasi ekstra', price: 4000 }, { label: 'Tempe goreng', price: 2000 }, { label: 'Rempeyek ekstra', price: 2000 }
+          ] }
+        ],
+        featured: false
+      },
+    ];
+
+    // --- APPLICATION STATE ---
+    let state = {
+      currentPage: 'beranda',
+      cart: [],
+      currentDetailItem: null,
+      detailQty: 1,
+      discountAmount: 0,
+      appliedVoucher: null,
+      activeOrder: null,
+      demoOrder: {
+        id: '#SKT-20261021-042',
+        isDemo: true,
+        queueNum: 'A-14',
+        step: 2, // 1: Diterima, 2: Dimasak, 3: Siap Diambil, 4: Selesai
+        tenant: 'Kantin Bu Siti',
+        time: '11:45 WIB',
+        eta: '8 Menit',
+        items: [
+          { name: 'Ayam Geprek Sambal Bawang UYM', qty: 1, price: 18500, note: 'Level 1 Sedang + Telur' }
+        ],
+        paymentMethod: 'QRIS Dinamis',
+        total: 18500
+      },
+      isMobileDeviceMode: false,
+    };
+
+    let orderHistory = [];
+    let openedOrderHistoryId = null;
+    let checkoutQueueCounter = 0;
+    state.activeOrder = null;
+
+    // --- INITIALIZATION ---
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      updateLiveClock();
+      setInterval(updateLiveClock, 1000);
+
+      renderFeaturedHome();
+      renderCatalogProducts();
+      updateCartBadges();
+      renderCart();
+      updateStatusDisplay();
+      renderOrderHistory();
+      renderHomeActiveOrder();
+      updateSaldoDisplay();
+      refreshRealOrderProgress();
+      setInterval(refreshRealOrderProgress, 1000);
+      updateStatusDisplay();
+      updateNavigationToggle();
+    });
+
+    document.addEventListener('click', event => {
+      const drawer = document.getElementById('mobile-menu-drawer');
+      if (event.target === drawer && !drawer.classList.contains('hidden')) {
+        toggleMobileMenu();
+      }
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+        const panelOpen = isDesktop
+          ? !document.getElementById('desktop-sidebar').classList.contains('sidebar-is-collapsed')
+          : !document.getElementById('mobile-menu-drawer').classList.contains('hidden');
+        if (panelOpen) toggleMobileMenu();
+      }
+    });
+
+    window.addEventListener('resize', updateNavigationToggle);
+
+    // --- LIVE CLOCK (Identik LMS UYM) ---
+    function updateLiveClock() {
+      const now = new Date();
+      const options = { day: 'numeric', month: 'short', year: 'numeric' };
+      const dateStr = now.toLocaleDateString('id-ID', options);
+      const timeStr = now.toTimeString().split(' ')[0];
+      const clockEl = document.getElementById('live-clock');
+      if (clockEl) {
+        clockEl.innerText = `${dateStr}, ${timeStr} WIB`;
+      }
+    }
+
+    // --- NAVIGATION CONTROLLER (6 PAGES) ---
+    function navigateTo(pageId) {
+      state.currentPage = pageId;
+
+      // Hide all page views
+      const pages = document.querySelectorAll('.page-view');
+      pages.forEach(p => p.classList.add('hidden'));
+
+      // Show selected page
+      const targetPage = document.getElementById(`page-${pageId === 'demo' ? 'status' : pageId}`);
+      if (targetPage) {
+        targetPage.classList.remove('hidden');
+      }
+
+      // Update Desktop Nav Active Indicator
+      const desktopNavs = document.querySelectorAll('.nav-item');
+      desktopNavs.forEach(nav => {
+        nav.classList.remove('text-uym-navy', 'bg-uym-soft', 'border-l-4', 'border-uym-navy');
+        nav.classList.add('text-slate-600');
+      });
+      const activeDesktopNav = document.getElementById(`nav-${pageId}`);
+      if (activeDesktopNav) {
+        activeDesktopNav.classList.remove('text-slate-600');
+        activeDesktopNav.classList.add('text-uym-navy', 'bg-uym-soft', 'border-l-4', 'border-uym-navy');
+      }
+
+      // Update Mobile Bottom Nav Active Indicator
+      const mobileNavBtns = document.querySelectorAll('.mobile-nav-btn');
+      mobileNavBtns.forEach(btn => {
+        btn.classList.remove('text-uym-navy');
+        btn.classList.add('text-slate-500');
+      });
+      const activeMobileNav = document.getElementById(`mobile-nav-${pageId}`);
+      if (activeMobileNav) {
+        activeMobileNav.classList.remove('text-slate-500');
+        activeMobileNav.classList.add('text-uym-navy');
+      }
+
+      // Re-trigger specific page renders
+      if (pageId === 'katalog') {
+        renderCatalogProducts();
+      }
+      if (pageId === 'keranjang') renderCart();
+      if (pageId === 'checkout') prepareCheckoutPage();
+      if (pageId === 'status' || pageId === 'demo') updateStatusDisplay();
+      if (pageId === 'history') renderOrderHistory();
+      renderHomeActiveOrder();
+
+      // Scroll to top
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      lucide.createIcons();
+    }
+
+    // --- TOGGLE MOBILE FRAME PREVIEW MODE ---
+    function toggleDeviceView() {
+      state.isMobileDeviceMode = !state.isMobileDeviceMode;
+      const appWrapper = document.getElementById('app-wrapper');
+      const viewModeBtn = document.getElementById('view-mode-btn');
+      const viewModeLabel = document.getElementById('view-mode-label');
+
+      if (state.isMobileDeviceMode) {
+        appWrapper.classList.add('device-mobile-frame', 'my-6', 'bg-white');
+        viewModeLabel.innerText = 'Mode Layar Penuh';
+        showToast('📱 Mode HP aktif (Menyerupai Frame Prototype Figma)');
+      } else {
+        appWrapper.classList.remove('device-mobile-frame', 'my-6', 'bg-white');
+        viewModeLabel.innerText = 'Mode HP';
+        showToast('🖥️ Mode Desktop aktif');
+      }
+    }
+
+    function updateNavigationToggle() {
+      const toggleButton = document.getElementById('navigation-toggle-btn');
+      if (!toggleButton) return;
+
+      const desktopSidebar = document.getElementById('desktop-sidebar');
+      const mobileDrawer = document.getElementById('mobile-menu-drawer');
+      const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+      const isOpen = isDesktop
+        ? !desktopSidebar.classList.contains('sidebar-is-collapsed')
+        : !mobileDrawer.classList.contains('hidden');
+
+      toggleButton.setAttribute('aria-expanded', String(isOpen));
+      toggleButton.setAttribute('aria-label', isOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi');
+      toggleButton.title = isOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi';
+      toggleButton.innerHTML = `<i data-lucide="${isOpen ? 'x' : 'menu'}" class="w-5 h-5"></i>`;
+      lucide.createIcons();
+    }
+
+    function toggleMobileMenu() {
+      const isDesktop = window.matchMedia('(min-width: 1024px)').matches;
+      if (isDesktop) {
+        document.getElementById('desktop-sidebar').classList.toggle('sidebar-is-collapsed');
+      } else {
+        document.getElementById('mobile-menu-drawer').classList.toggle('hidden');
+      }
+      updateNavigationToggle();
+    }
+
+    // --- RENDER HOME FEATURED MENU ---
+    function renderFeaturedHome() {
+      const container = document.getElementById('beranda-featured-grid');
+      if (!container) return;
+
+      const featuredItems = MENU_DATABASE.slice(0, 4);
+      container.innerHTML = featuredItems.map(item => `
+        <div class="bg-white rounded-xl border border-slate-200/80 shadow-lms hover:shadow-card-hover transition overflow-hidden flex flex-col justify-between group">
+          <div>
+            <div class="relative h-36 bg-slate-100 overflow-hidden">
+              <img src="${item.image}" alt="${item.name}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+              <span class="absolute top-2 left-2 bg-white/90 backdrop-blur-xs text-[10px] font-bold text-slate-800 px-2 py-0.5 rounded-full flex items-center space-x-1">
+                <i data-lucide="star" class="w-3 h-3 text-amber-500 fill-amber-500"></i>
+                <span>${item.rating}</span>
+              </span>
+              <span class="absolute bottom-2 left-2 bg-uym-navy/90 text-white text-[9px] font-semibold px-2 py-0.5 rounded-full">
+                ${item.tenant}
+              </span>
+            </div>
+            <div class="p-4">
+              <h4 class="text-sm font-bold text-slate-800 line-clamp-1 group-hover:text-uym-royal transition">${item.name}</h4>
+              <p class="text-[11px] text-slate-500 line-clamp-2 mt-1">${item.desc}</p>
+            </div>
+          </div>
+          <div class="px-4 pb-4 pt-1 flex items-center justify-between border-t border-slate-100">
+            <div>
+              <span class="text-[10px] text-slate-400 block">Harga:</span>
+              <span class="text-sm font-extrabold text-uym-navy">Rp ${item.price.toLocaleString('id-ID')}</span>
+            </div>
+            <button onclick="openMenuDetail('${item.id}')" class="bg-uym-soft hover:bg-uym-navy text-uym-navy hover:text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1">
+              <span>Pesan</span>
+              <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+            </button>
+          </div>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    // --- RENDER CATALOG PRODUCTS ---
+    function renderCatalogProducts() {
+      const container = document.getElementById('catalog-product-grid');
+      const emptyState = document.getElementById('catalog-empty-state');
+      if (!container) return;
+
+      const products = MENU_DATABASE;
+
+      if (products.length === 0) {
+        container.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+      } else {
+        container.classList.remove('hidden');
+        emptyState.classList.add('hidden');
+
+        container.innerHTML = products.map(item => `
+          <div class="bg-white rounded-xl border border-slate-200/80 shadow-lms hover:shadow-card-hover transition overflow-hidden flex flex-col justify-between group">
+            <div>
+              <div class="relative h-40 bg-slate-100 overflow-hidden cursor-pointer" onclick="openMenuDetail('${item.id}')">
+                <img src="${item.image}" alt="${item.name}" class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+                <span class="absolute top-2 left-2 bg-white/90 backdrop-blur-xs text-[10px] font-bold text-slate-800 px-2 py-0.5 rounded-full flex items-center space-x-1">
+                  <i data-lucide="star" class="w-3 h-3 text-amber-500 fill-amber-500"></i>
+                  <span>${item.rating}</span>
+                </span>
+                <span class="absolute top-2 right-2 bg-emerald-500 text-white text-[9px] font-bold px-2 py-0.5 rounded-full">
+                  Siap ${item.time}
+                </span>
+                <span class="absolute bottom-2 left-2 bg-uym-navy/90 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full">
+                  ${item.tenant}
+                </span>
+              </div>
+              <div class="p-4 cursor-pointer" onclick="openMenuDetail('${item.id}')">
+                <div class="flex items-center space-x-1.5 mb-1">
+                  <span class="text-[9px] font-bold uppercase tracking-wider text-uym-royal bg-blue-50 px-1.5 py-0.5 rounded">${item.category}</span>
+                </div>
+                <h4 class="text-sm font-bold text-slate-800 line-clamp-1 group-hover:text-uym-royal transition">${item.name}</h4>
+                <p class="text-[11px] text-slate-500 line-clamp-2 mt-1 leading-normal">${item.desc}</p>
+              </div>
+            </div>
+            <div class="px-4 pb-4 pt-1 flex items-center justify-between border-t border-slate-100">
+              <div>
+                <span class="text-[10px] text-slate-400 block">Harga:</span>
+                <span class="text-sm font-extrabold text-uym-navy">Rp ${item.price.toLocaleString('id-ID')}</span>
+              </div>
+              <button onclick="openMenuDetail('${item.id}')" class="bg-uym-navy hover:bg-uym-royal text-white px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1 shadow-sm">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i>
+                <span>Pilih</span>
+              </button>
+            </div>
+          </div>
+        `).join('');
+      }
+      lucide.createIcons();
+    }
+
+    // --- HALAMAN 3: DETAIL MENU LOGIC ---
+    function openMenuDetail(menuId) {
+      const item = MENU_DATABASE.find(m => m.id === menuId);
+      if (!item) return;
+
+      state.currentDetailItem = item;
+      state.detailQty = 1;
+
+      // Populate Detail View Elements
+      document.getElementById('detail-breadcrumb-title').innerText = item.name;
+      document.getElementById('detail-image').src = item.image;
+      document.getElementById('detail-name').innerText = item.name;
+      document.getElementById('detail-tenant').innerText = item.tenant;
+      document.getElementById('detail-category-badge').innerText = item.category;
+      document.getElementById('detail-desc').innerText = item.desc;
+      document.getElementById('detail-rating').innerText = item.rating;
+      document.getElementById('detail-qty-val').innerText = '1';
+      document.getElementById('detail-notes').value = '';
+
+      renderMenuCustomizations(item);
+      calculateDetailPrice();
+      navigateTo('detail');
+    }
+
+    function renderMenuCustomizations(item) {
+      const container = document.getElementById('detail-customizations');
+      const groups = item.customizationGroups || [];
+
+      if (groups.length === 0) {
+        container.innerHTML = '<p class="text-xs text-slate-500">Tidak ada pilihan tambahan untuk menu ini.</p>';
+        return;
+      }
+
+      container.innerHTML = groups.map((group, groupIndex) => {
+        const optionsMarkup = group.options.map((option, optionIndex) => {
+          const inputName = `customization-${groupIndex}`;
+          const checked = group.type === 'radio' && optionIndex === 0 ? 'checked' : '';
+          const price = Number(option.price) || 0;
+          const priceLabel = price > 0 ? `+${formatRupiah(price)}` : '';
+
+          if (group.type === 'radio') {
+            return `
+              <label class="cursor-pointer border border-slate-200 rounded-lg p-2 text-center text-xs has-[:checked]:border-uym-royal has-[:checked]:bg-blue-50 transition">
+                <input type="radio" name="${inputName}" value="${escapeHistoryText(option.label)}" data-label="${escapeHistoryText(option.label)}" data-price="${price}" class="sr-only" ${checked} onchange="calculateDetailPrice()">
+                <span class="font-semibold block">${escapeHistoryText(option.label)}</span>
+                ${priceLabel ? `<span class="text-[10px] text-slate-500 block">${priceLabel}</span>` : ''}
+              </label>`;
+          }
+
+          return `
+            <label class="flex items-center justify-between p-2 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer text-xs">
+              <span class="flex items-center space-x-2">
+                <input type="checkbox" name="${inputName}" value="${escapeHistoryText(option.label)}" data-label="${escapeHistoryText(option.label)}" data-price="${price}" class="rounded text-uym-navy focus:ring-uym-royal" onchange="calculateDetailPrice()">
+                <span>${escapeHistoryText(option.label)}</span>
+              </span>
+              ${priceLabel ? `<span class="font-bold text-slate-700">${priceLabel}</span>` : ''}
+            </label>`;
+        }).join('');
+
+        return `
+          <div>
+            <p class="block text-xs font-bold text-slate-700 mb-1.5">${escapeHistoryText(group.title)}:</p>
+            <div class="${group.type === 'radio' ? 'grid grid-cols-2 sm:grid-cols-3 gap-2' : 'space-y-1.5'}">${optionsMarkup}</div>
+          </div>`;
+      }).join('');
+    }
+
+    function getSelectedCustomizations() {
+      return [...document.querySelectorAll('#detail-customizations input:checked')].map(input => ({
+        label: input.dataset.label || input.value,
+        price: Number(input.dataset.price) || 0
+      }));
+    }
+
+    function getCartCustomizationLabels(item) {
+      if (Array.isArray(item.customizations)) {
+        return item.customizations.map(choice => choice.label).filter(Boolean);
+      }
+      return [item.spice, ...(item.toppings || [])].filter(Boolean);
+    }
+
+    function updateDetailQty(delta) {
+      state.detailQty = Math.max(1, state.detailQty + delta);
+      document.getElementById('detail-qty-val').innerText = state.detailQty;
+      calculateDetailPrice();
+    }
+
+    function calculateDetailPrice() {
+      if (!state.currentDetailItem) return;
+
+      const basePrice = state.currentDetailItem.price;
+      const customizations = getSelectedCustomizations();
+      const customizationExtra = customizations.reduce((total, choice) => total + choice.price, 0);
+      const singleItemPrice = basePrice + customizationExtra;
+      const totalPrice = singleItemPrice * state.detailQty;
+
+      document.getElementById('detail-price-display').innerText = `Rp ${basePrice.toLocaleString('id-ID')}`;
+      document.getElementById('detail-total-btn-price').innerText = `Rp ${totalPrice.toLocaleString('id-ID')}`;
+
+      return { singleItemPrice, totalPrice, customizationExtra, customizations };
+    }
+
+    function confirmAddToCart() {
+      if (!state.currentDetailItem) return;
+
+      const calc = calculateDetailPrice();
+      const notes = document.getElementById('detail-notes').value.trim();
+
+      const newCartItem = {
+        id: `cart-${Date.now()}`,
+        menuId: state.currentDetailItem.id,
+        name: state.currentDetailItem.name,
+        tenant: state.currentDetailItem.tenant,
+        unitPrice: state.currentDetailItem.price,
+        qty: state.detailQty,
+        customizations: calc.customizations,
+        customizationExtra: calc.customizationExtra,
+        totalPrice: calc.totalPrice,
+        notes: notes,
+        image: state.currentDetailItem.image
+      };
+
+      state.cart.push(newCartItem);
+      updateCartBadges();
+      showToast(`🛒 ${state.currentDetailItem.name} berhasil ditambahkan ke Keranjang!`);
+      navigateTo('keranjang');
+    }
+
+    // --- HALAMAN 4: KERANJANG BELANJA LOGIC ---
+    function renderCart() {
+      const container = document.getElementById('cart-items-container');
+      const emptyState = document.getElementById('cart-empty-state');
+      const btnToCheckout = document.getElementById('btn-to-checkout');
+
+      if (state.cart.length === 0) {
+        container.innerHTML = '';
+        emptyState.classList.remove('hidden');
+        btnToCheckout.disabled = true;
+        btnToCheckout.classList.add('opacity-50', 'pointer-events-none');
+        updateCartSummary(0);
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      btnToCheckout.disabled = false;
+      btnToCheckout.classList.remove('opacity-50', 'pointer-events-none');
+
+      let subtotal = 0;
+
+      container.innerHTML = state.cart.map(item => {
+        subtotal += item.totalPrice;
+        const customizationLabels = getCartCustomizationLabels(item).map(escapeHistoryText).join(', ');
+        return `
+          <div class="bg-white p-4 rounded-xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div class="flex items-center space-x-3">
+              <img src="${item.image}" alt="${item.name}" class="w-16 h-16 rounded-lg object-cover shrink-0">
+              <div>
+                <span class="text-[9px] font-bold text-uym-royal bg-blue-50 px-1.5 py-0.5 rounded">${item.tenant}</span>
+                <h4 class="text-xs sm:text-sm font-bold text-slate-800 mt-0.5">${item.name}</h4>
+                <div class="text-[10px] text-slate-500 mt-0.5 space-y-0.5">
+                  ${customizationLabels ? `<p>Pilihan: <span class="font-semibold text-slate-700">${customizationLabels}</span></p>` : ''}
+                  ${item.notes ? `<p class="italic text-slate-400">“${escapeHistoryText(item.notes)}”</p>` : ''}
+                </div>
+              </div>
+            </div>
+
+            <div class="flex items-center justify-between w-full sm:w-auto sm:space-x-4 border-t sm:border-t-0 pt-2 sm:pt-0">
+              <div class="flex items-center border border-slate-200 rounded-lg bg-slate-50 px-2 py-0.5">
+                <button onclick="updateCartItemQty('${item.id}', -1)" class="w-6 h-6 flex items-center justify-center font-bold text-slate-600 hover:text-uym-navy">-</button>
+                <span class="w-6 text-center font-bold text-xs text-slate-800">${item.qty}</span>
+                <button onclick="updateCartItemQty('${item.id}', 1)" class="w-6 h-6 flex items-center justify-center font-bold text-slate-600 hover:text-uym-navy">+</button>
+              </div>
+
+              <div class="text-right">
+                <p class="text-xs sm:text-sm font-black text-uym-navy">Rp ${item.totalPrice.toLocaleString('id-ID')}</p>
+                <button onclick="removeCartItem('${item.id}')" class="text-[10px] text-rose-500 hover:underline font-semibold flex items-center space-x-0.5 mt-0.5">
+                  <i data-lucide="trash-2" class="w-3 h-3"></i>
+                  <span>Hapus</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      updateCartSummary(subtotal);
+      lucide.createIcons();
+    }
+
+    function updateCartItemQty(itemId, delta) {
+      const item = state.cart.find(c => c.id === itemId);
+      if (!item) return;
+
+      item.qty += delta;
+      if (item.qty <= 0) {
+        removeCartItem(itemId);
+        return;
+      }
+
+      const singleUnitTotal = item.unitPrice + (item.customizationExtra ?? item.toppingExtra ?? 0);
+      item.totalPrice = singleUnitTotal * item.qty;
+
+      updateCartBadges();
+      renderCart();
+    }
+
+    function removeCartItem(itemId) {
+      state.cart = state.cart.filter(c => c.id !== itemId);
+      updateCartBadges();
+      renderCart();
+      showToast('Item berhasil dihapus dari keranjang.');
+    }
+
+    function updateCartSummary(subtotal) {
+      const discount = state.discountAmount;
+      const total = Math.max(0, subtotal - discount);
+
+      document.getElementById('cart-subtotal').innerText = `Rp ${subtotal.toLocaleString('id-ID')}`;
+      document.getElementById('cart-discount').innerText = `-Rp ${discount.toLocaleString('id-ID')}`;
+      document.getElementById('cart-total').innerText = `Rp ${total.toLocaleString('id-ID')}`;
+    }
+
+    function updateCartBadges() {
+      const totalCount = state.cart.reduce((sum, item) => sum + item.qty, 0);
+      document.getElementById('cart-badge-desktop').innerText = totalCount;
+      document.getElementById('cart-badge-header').innerText = totalCount;
+      document.getElementById('mobile-cart-badge').innerText = totalCount;
+    }
+
+    function applyVoucherCode() {
+      const val = document.getElementById('voucher-input').value.trim().toUpperCase();
+      applyPromoCode(val);
+    }
+
+    function applyPromoCode(code) {
+      if (code === 'UYMHEMAT' || code === 'MABAUYM') {
+        state.discountAmount = 3000;
+        state.appliedVoucher = code;
+        const statusEl = document.getElementById('voucher-status');
+        if (statusEl) {
+          statusEl.innerHTML = `<span class="text-emerald-600 font-bold">✅ Kode ${code} Berhasil Dipakai! Diskon Rp 3.000</span>`;
+        }
+        showToast(`🎉 Voucher ${code} aktif! Hemat Rp 3.000`);
+        renderCart();
+      } else {
+        showToast('❌ Kode voucher tidak valid.');
+      }
+    }
+
+    function proceedToCheckout() {
+      if (state.cart.length === 0) {
+        showToast('Keranjang kamu masih kosong!');
+        return;
+      }
+      navigateTo('checkout');
+    }
+
+    // --- HALAMAN 5: CHECKOUT LOGIC ---
+    function prepareCheckoutPage() {
+      const listContainer = document.getElementById('checkout-mini-list');
+      let subtotal = 0;
+      const prepMinutes = state.cart
+        .map(item => {
+          const menu = MENU_DATABASE.find(menuItem => menuItem.id === item.menuId);
+          const match = menu?.time.match(/\d+/);
+          return match ? Number(match[0]) : 0;
+        })
+        .filter(minutes => minutes > 0);
+
+      listContainer.innerHTML = state.cart.map(item => {
+        subtotal += item.totalPrice;
+        return `
+          <div class="flex items-center justify-between py-1 border-b border-slate-50">
+            <div>
+              <p class="font-bold text-slate-800">${item.qty}x ${item.name}</p>
+              <p class="text-[10px] text-slate-400">${escapeHistoryText(item.tenant)} &bull; ${getCartCustomizationLabels(item).map(escapeHistoryText).join(', ') || 'Pilihan standar'}</p>
+            </div>
+            <span class="font-bold text-slate-700">Rp ${item.totalPrice.toLocaleString('id-ID')}</span>
+          </div>
+        `;
+      }).join('');
+
+      const total = Math.max(0, subtotal - state.discountAmount);
+      document.getElementById('checkout-subtotal').innerText = `Rp ${subtotal.toLocaleString('id-ID')}`;
+      document.getElementById('checkout-discount').innerText = `-Rp ${state.discountAmount.toLocaleString('id-ID')}`;
+      document.getElementById('checkout-total-price').innerText = `Rp ${total.toLocaleString('id-ID')}`;
+      const prepEstimate = document.getElementById('checkout-prep-estimate');
+      prepEstimate.innerText = prepMinutes.length
+        ? `Perkiraan penyiapan menu terlama: sekitar ${Math.max(...prepMinutes)} menit. Acuan survei: pesanan siap di bawah 10 menit. Status checkout dipercepat menjadi 5 detik per tahap untuk demonstrasi UI/UX.`
+        : 'Tambahkan menu untuk melihat perkiraan waktu penyiapan.';
+    }
+
+    function handlePlaceOrder() {
+      const paymentRadios = document.getElementsByName('payment-method');
+      let selectedMethod = 'QRIS Dinamis';
+      for (const r of paymentRadios) {
+        if (r.checked) selectedMethod = r.value;
+      }
+
+      const pickupRadios = document.getElementsByName('pickup-time');
+      let selectedPickupTime = 'Segera (sesuai estimasi menu)';
+      for (const r of pickupRadios) {
+        if (r.checked) selectedPickupTime = r.value;
+      }
+
+      let subtotal = state.cart.reduce((s, i) => s + i.totalPrice, 0);
+      let grandTotal = Math.max(0, subtotal - state.discountAmount);
+
+      if (selectedMethod === 'Saldo KTM Mahasiswa') {
+        if (state_saldo < grandTotal) {
+          showToast('⚠️ Saldo KTM tidak mencukupi. Silakan top up terlebih dahulu.');
+          return;
+        }
+
+        state_saldo -= grandTotal;
+        updateSaldoDisplay();
+        showToast('✅ Pembayaran KTM berhasil. Sisa saldo: ' + formatRupiah(state_saldo));
+      }
+
+      // If QRIS, show QRIS popup simulation
+      if (selectedMethod === 'QRIS Dinamis') {
+        document.getElementById('qris-amount-display').innerText = `Rp ${grandTotal.toLocaleString('id-ID')}`;
+        openModal('modal-qris');
+      } else {
+        // Direct order confirmation
+        createActiveOrder(selectedMethod, selectedPickupTime, grandTotal);
+      }
+    }
+
+    function completePaymentSimulation() {
+      closeModal('modal-qris');
+      const pickupRadios = document.getElementsByName('pickup-time');
+      let selectedPickupTime = 'Segera (sesuai estimasi menu)';
+      for (const r of pickupRadios) {
+        if (r.checked) selectedPickupTime = r.value;
+      }
+      let subtotal = state.cart.reduce((s, i) => s + i.totalPrice, 0);
+      let grandTotal = Math.max(0, subtotal - state.discountAmount);
+
+      createActiveOrder('QRIS Dinamis (Lunas)', selectedPickupTime, grandTotal);
+    }
+
+    function createActiveOrder(method, pickupTime, total) {
+      const queueSequence = ++checkoutQueueCounter;
+      const queueLetter = queueSequence % 2 === 1 ? 'A' : 'B';
+      const queueNumber = `${queueLetter}-${Math.ceil(queueSequence / 2)}`;
+      const orderId = `#SKT-20261021-0${Math.floor(Math.random() * 90) + 10}`;
+
+      state.activeOrder = {
+        id: orderId,
+        isDemo: false,
+        createdAt: new Date().toISOString(),
+        queueNum: queueNumber,
+        step: 1, // Start at 1: Diterima
+        tenant: state.cart[0] ? state.cart[0].tenant : 'Kantin Bu Siti',
+        time: pickupTime,
+        eta: 'Pesanan diterima',
+        items: state.cart.map(i => ({
+          name: i.name,
+          qty: i.qty,
+          price: i.totalPrice,
+          note: (i.customizations || [
+            ...(i.spice ? [{ label: i.spice }] : []),
+            ...(i.toppings || []).map(label => ({ label }))
+          ]).map(choice => choice.label).join(', ') || 'Pilihan standar'
+        })),
+        paymentMethod: method,
+        total: total,
+        balanceAfter: method === 'Saldo KTM Mahasiswa' ? state_saldo : null
+      };
+
+      orderHistory.unshift(state.activeOrder);
+      renderOrderHistory();
+      renderHomeActiveOrder();
+
+      // Clear cart
+      state.cart = [];
+      updateCartBadges();
+
+      showToast(`🎉 Pesanan ${orderId} berhasil dibuat! Nomor Antrean: ${queueNumber}`);
+      navigateTo('status');
+    }
+
+    function refreshRealOrderProgress() {
+      const order = state.activeOrder;
+      if (!order || order.isDemo || !order.createdAt || order.step >= 4) return;
+
+      const elapsedSeconds = Math.floor((Date.now() - new Date(order.createdAt).getTime()) / 1000);
+      const nextStep = Math.min(4, Math.max(1, Math.floor(elapsedSeconds / 5) + 1));
+      if (nextStep === order.step) return;
+
+      order.step = nextStep;
+      order.eta = ['Pesanan diterima', 'Sedang disiapkan', 'Siap diambil', 'Selesai'][nextStep - 1];
+      if (nextStep === 4) {
+        state.activeOrder = null;
+      }
+      updateStatusDisplay();
+      renderOrderHistory();
+      renderHomeActiveOrder();
+
+      if (nextStep === 3) {
+        showToast(`🔔 Pesanan ${order.id} siap diambil di Meja SiKantin.`);
+      } else if (nextStep === 4) {
+        showToast(`✅ Pesanan ${order.id} telah selesai.`);
+      } else {
+        showToast(`Pesanan ${order.id}: ${getOrderStatusLabel(nextStep)}.`);
+      }
+    }
+
+    function escapeHistoryText(value) {
+      return String(value ?? '').replace(/[&<>"']/g, character => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      })[character]);
+    }
+
+    function renderOrderHistory() {
+      const container = document.getElementById('order-history-list');
+      if (!container) return;
+
+      if (orderHistory.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-12 bg-white rounded-2xl border border-slate-200">
+            <div class="w-14 h-14 bg-blue-50 text-uym-royal rounded-full flex items-center justify-center mx-auto mb-3">
+              <i data-lucide="receipt-text" class="w-7 h-7"></i>
+            </div>
+            <h4 class="text-sm font-bold text-slate-700">Anda belum memiliki riwayat pesanan</h4>
+            <p class="text-xs text-slate-500 mt-1">Riwayat pesanan akan tampil setelah Anda melakukan pemesanan pada sesi ini. Riwayat akan dikosongkan saat halaman dimuat ulang.</p>
+            <button onclick="navigateTo('katalog')" class="mt-4 px-4 py-2 bg-uym-navy text-white text-xs font-bold rounded-lg hover:bg-uym-royal transition">
+              Lihat Katalog Menu
+            </button>
+          </div>`;
+        lucide.createIcons();
+        return;
+      }
+
+      container.innerHTML = orderHistory.map(order => {
+        const items = Array.isArray(order.items) ? order.items : [];
+        const itemSummary = items.map(item =>
+          `<li>${escapeHistoryText(item.qty)}x ${escapeHistoryText(item.name)}${item.note ? ` <span class="text-slate-400">(${escapeHistoryText(item.note)})</span>` : ''}</li>`
+        ).join('');
+        const orderDate = order.createdAt
+          ? new Date(order.createdAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
+          : 'Waktu tidak tersedia';
+        const isKtmPayment = order.paymentMethod === 'Saldo KTM Mahasiswa';
+        const balanceNote = isKtmPayment && Number.isFinite(order.balanceAfter)
+          ? `<p class="mt-2 text-[11px] font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">${order.balanceRefunded ? `Saldo KTM ${formatRupiah(order.total)} dikembalikan` : `Saldo KTM terpotong ${formatRupiah(order.total)}`} · ${order.balanceRefunded ? 'Saldo setelah pengembalian' : 'Saldo setelah transaksi'} ${formatRupiah(order.balanceAfter)}</p>`
+          : '';
+        const isExpanded = openedOrderHistoryId === order.id;
+        const isCancelled = Boolean(order.cancelledAt);
+        const canCancel = !order.isDemo && !isCancelled && order.step < 4;
+        const statusLabel = isCancelled ? 'Pesanan dibatalkan' : getOrderStatusLabel(order.step);
+        const detailId = `history-detail-${escapeHistoryText(order.id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+        const statusDetails = isExpanded ? `
+          <div id="${detailId}" class="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
+            ${isCancelled
+              ? `<p class="text-xs text-rose-700">Pesanan dibatalkan pada ${escapeHistoryText(new Date(order.cancelledAt).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }))}.</p>
+                ${order.paymentMethod && order.paymentMethod.includes('QRIS') ? '<p class="mt-1 text-[10px] text-slate-500">Pembayaran QRIS pada prototipe ini disimulasikan; pengembalian dana aktual perlu diproses oleh tenant.</p>' : ''}`
+              : `<p class="text-xs font-bold text-slate-700 mb-2">Perkembangan pesanan</p>
+                <ol class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
+                  ${['Pesanan diterima', 'Sedang disiapkan', 'Siap diambil', 'Pesanan selesai'].map((label, index) => `
+                    <li class="${order.step >= index + 1 ? 'text-emerald-700 font-bold' : 'text-slate-400'}">
+                      <span class="inline-flex w-5 h-5 items-center justify-center rounded-full ${order.step >= index + 1 ? 'bg-emerald-100' : 'bg-slate-200'} mr-1">${index + 1}</span>${label}
+                    </li>`).join('')}
+                </ol>
+                <p class="mt-2 text-[10px] text-slate-500">${order.isDemo ? 'Status demo, diperbarui manual.' : order.step >= 4 ? 'Pesanan telah selesai.' : 'Status checkout diperbarui otomatis setiap 5 detik.'}</p>`}
+            ${!order.isDemo && !isCancelled && order.step < 4 ? `
+              <button type="button" onclick="openOrderFromHistory('${escapeHistoryText(order.id)}')" class="mt-2 text-[11px] font-bold text-uym-royal hover:underline">
+                Buka status pesanan aktif
+              </button>` : ''}
+          </div>` : '';
+
+        return `
+          <article class="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-sm">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="text-sm font-extrabold text-slate-800">${escapeHistoryText(order.id)}</p>
+                <p class="text-[11px] text-slate-500 mt-1">${escapeHistoryText(orderDate)} · ${escapeHistoryText(order.tenant || 'Kantin UYM')}</p>
+                <span class="inline-block mt-2 text-[10px] font-bold px-2 py-1 rounded-full ${isCancelled ? 'bg-rose-100 text-rose-700' : order.step >= 4 ? 'bg-emerald-100 text-emerald-700' : order.step === 3 ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-700'}">${statusLabel}</span>
+              </div>
+              <div class="text-right">
+                <p class="text-[10px] text-slate-500">Total pesanan</p>
+                <p class="text-base font-black text-uym-navy">${formatRupiah(Number(order.total) || 0)}</p>
+              </div>
+            </div>
+            <ul class="mt-3 space-y-1 text-xs text-slate-700 list-disc list-inside">${itemSummary}</ul>
+            <div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span class="text-slate-500">Pembayaran: <strong class="text-uym-royal">${escapeHistoryText(order.paymentMethod || 'Tidak diketahui')}</strong></span>
+              <span class="text-slate-500">Antrean: <strong class="text-slate-700">${escapeHistoryText(order.queueNum || '-')}</strong></span>
+            </div>
+            <button type="button" onclick="toggleOrderHistoryDetails('${escapeHistoryText(order.id)}')" aria-expanded="${isExpanded}" aria-controls="${detailId}" class="mt-3 text-xs font-bold text-uym-royal hover:underline">
+              ${isExpanded ? 'Tutup detail' : 'Lihat detail pesanan'}
+            </button>
+            ${statusDetails}
+            ${canCancel ? `
+              <button type="button" onclick="cancelOrder('${escapeHistoryText(order.id)}')" class="ml-3 mt-3 text-xs font-bold text-rose-700 hover:underline">
+                Batalkan Pesanan
+              </button>` : ''}
+            ${balanceNote}
+          </article>`;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function getOrderStatusLabel(step) {
+      return ['Pesanan diterima', 'Sedang disiapkan', 'Siap diambil', 'Pesanan selesai'][Math.min(4, Math.max(1, Number(step) || 1)) - 1];
+    }
+
+    function renderHomeActiveOrder() {
+      const card = document.getElementById('home-active-order-card');
+      if (!card) return;
+
+      const order = state.activeOrder;
+      const isInProgress = Boolean(order && !order.isDemo && !order.cancelledAt && order.step < 4);
+      card.classList.toggle('hidden', !isInProgress || ['status', 'demo'].includes(state.currentPage));
+      document.getElementById('active-order-badge').classList.toggle('hidden', !isInProgress);
+      document.getElementById('stat-active-orders').innerText = isInProgress ? '1' : '0';
+      document.getElementById('stat-active-order-status').innerText = isInProgress
+        ? getOrderStatusLabel(order.step)
+        : 'Belum ada pesanan aktif';
+      if (!isInProgress) return;
+
+      document.getElementById('home-active-order-status').innerText = getOrderStatusLabel(order.step);
+      document.getElementById('home-active-order-id').innerText = order.id;
+      document.getElementById('home-active-order-queue').innerText = order.queueNum;
+      document.getElementById('home-active-order-items').innerText = order.items
+        .map(item => `${item.qty}x ${item.name}`)
+        .join(', ');
+      document.getElementById('home-active-order-progress').style.width = `${Math.min(100, Math.max(25, order.step * 25))}%`;
+
+      const note = document.getElementById('home-active-order-note');
+      note.innerText = order.step === 3
+        ? 'Pesanan siap diambil. Status selesai akan diperbarui otomatis dalam 5 detik.'
+        : 'Status pesanan diperbarui otomatis setiap 5 detik.';
+      lucide.createIcons();
+    }
+
+    function toggleOrderHistoryDetails(orderId) {
+      openedOrderHistoryId = openedOrderHistoryId === orderId ? null : orderId;
+      renderOrderHistory();
+    }
+
+    function openOrderFromHistory(orderId) {
+      const order = orderHistory.find(item => item.id === orderId);
+      if (!order || order.cancelledAt || order.step >= 4) {
+        showToast('Pesanan ini tidak lagi aktif.');
+        return;
+      }
+      state.activeOrder = order;
+      navigateTo('status');
+    }
+
+    function cancelOrder(orderId) {
+      const order = orderHistory.find(item => item.id === orderId) || state.activeOrder;
+      if (!order || order.isDemo || order.cancelledAt || order.step >= 4) {
+        showToast('Pesanan ini tidak dapat dibatalkan.');
+        return;
+      }
+      if (!confirm(`Batalkan pesanan ${order.id}?`)) return;
+
+      order.cancelledAt = new Date().toISOString();
+      if (order.paymentMethod === 'Saldo KTM Mahasiswa' && !order.balanceRefunded) {
+        state_saldo += order.total;
+        order.balanceAfter = state_saldo;
+        order.balanceRefunded = true;
+        updateSaldoDisplay();
+      }
+      if (state.activeOrder && state.activeOrder.id === order.id) {
+        state.activeOrder = null;
+      }
+
+      renderOrderHistory();
+      renderHomeActiveOrder();
+      updateStatusDisplay();
+      showToast(order.balanceRefunded
+        ? `Pesanan ${order.id} dibatalkan. Saldo KTM ${formatRupiah(order.total)} dikembalikan.`
+        : `Pesanan ${order.id} berhasil dibatalkan.`);
+    }
+
+    // --- HALAMAN 6: STATUS PESANAN LOGIC ---
+    function updateStatusDisplay() {
+      const isDemoView = state.currentPage === 'demo';
+      const order = isDemoView ? state.demoOrder : state.activeOrder;
+      const title = document.getElementById('status-page-title');
+      const description = document.getElementById('status-page-description');
+      const emptyState = document.getElementById('status-empty-state');
+      const orderContent = document.getElementById('status-order-content');
+      const demoAdvanceButton = document.getElementById('status-demo-advance-btn');
+      const demoStepButton = document.getElementById('status-demo-step-btn');
+      const cancelOrderButton = document.getElementById('status-cancel-order-btn');
+
+      title.innerText = isDemoView ? 'Simulasi Pemesanan' : 'Status Pesanan';
+      description.innerText = isDemoView
+        ? 'Demo ini berdiri sendiri dan statusnya hanya berubah saat dimajukan manual.'
+        : 'Status pesanan checkout diperbarui otomatis setiap 5 detik.';
+      demoAdvanceButton.classList.toggle('hidden', !isDemoView);
+      demoStepButton.classList.toggle('hidden', !isDemoView);
+      cancelOrderButton.classList.toggle('hidden', isDemoView || !order || order.step >= 4);
+      emptyState.classList.toggle('hidden', Boolean(order));
+      orderContent.classList.toggle('hidden', !order);
+      if (!order) return;
+
+      const modeBadge = document.getElementById('order-mode-badge');
+      if (modeBadge) modeBadge.innerText = isDemoView ? 'Demo manual' : 'Checkout otomatis';
+      document.getElementById('order-id-label').innerText = order.id;
+      document.getElementById('status-tenant-label').innerText = order.tenant || 'Kantin UYM';
+      document.getElementById('status-order-qr').src = `https://api.qrserver.com/v1/create-qr-code/?size=130x130&data=${encodeURIComponent(`SIKANTIN-UYM-${order.queueNum}`)}`;
+      document.getElementById('queue-number-display').innerText = order.queueNum;
+      document.getElementById('queue-eta-badge').innerText = order.eta;
+      document.getElementById('status-payment-badge').innerText = order.paymentMethod;
+      document.getElementById('status-total-badge').innerText = `Rp ${order.total.toLocaleString('id-ID')}`;
+
+      // Update Stepper Nodes UI based on order.step
+      for (let s = 1; s <= 4; s++) {
+        const node = document.getElementById(`step-node-${s}`);
+        if (!node) continue;
+
+        if (s < order.step) {
+          // Completed step
+          node.className = 'step-node text-center opacity-100';
+          node.querySelector('div').className = 'w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto mb-1.5 shadow-sm';
+        } else if (s === order.step) {
+          // Current Active step
+          node.className = 'step-node text-center opacity-100';
+          node.querySelector('div').className = 'w-10 h-10 rounded-full bg-uym-royal text-white flex items-center justify-center mx-auto mb-1.5 shadow-md animate-bounce';
+        } else {
+          // Pending step
+          node.className = 'step-node text-center opacity-40';
+          node.querySelector('div').className = 'w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center mx-auto mb-1.5 shadow-sm';
+        }
+      }
+
+      // Update text banner
+      const headline = document.getElementById('status-headline');
+      const subtext = document.getElementById('status-subtext');
+
+      if (order.step === 1) {
+        headline.innerText = 'Pesanan diterima restoran';
+        subtext.innerText = isDemoView
+          ? 'Contoh status demo. Gunakan tombol untuk memajukan tahap secara manual.'
+          : 'Pesanan Anda sudah diterima dan akan segera disiapkan.';
+      } else if (order.step === 2) {
+        headline.innerText = `Penjual ${order.tenant || 'kantin kampus'} sudah menerima notifikasi`;
+        subtext.innerText = isDemoView
+          ? 'Status demo. Pesanan sedang disiapkan oleh penjual kantin; gunakan tombol untuk memajukan tahap.'
+          : 'Penjual kantin sedang menyiapkan menu pesanan Anda. Kami akan memberi kabar saat pesanan siap diambil.';
+      } else if (order.step === 3) {
+        headline.innerText = '🔔 Pesanan Anda siap diambil';
+        subtext.innerText = isDemoView
+          ? 'Contoh status demo. Gunakan tombol untuk memajukan tahap secara manual.'
+          : 'Silakan ambil pesanan dengan nomor antrean ' + order.queueNum + '.';
+      } else if (order.step === 4) {
+        headline.innerText = '✅ Pesanan selesai';
+        subtext.innerText = isDemoView
+          ? 'Contoh status demo selesai.'
+          : 'Terima kasih telah memesan. Pesanan ini dapat dilihat kembali di Riwayat Pesanan.';
+      }
+
+      // Render Items in Status
+      const list = document.getElementById('status-items-list');
+      if (list && order.items) {
+        list.innerHTML = order.items.map(item => `
+          <div class="flex items-center justify-between py-1 border-b border-slate-100">
+            <div>
+              <p class="font-bold text-slate-800">${item.qty}x ${item.name}</p>
+              <p class="text-[10px] text-slate-400">${item.note || ''}</p>
+            </div>
+            <span class="font-semibold text-slate-700">Rp ${item.price.toLocaleString('id-ID')}</span>
+          </div>
+        `).join('');
+      }
+
+      lucide.createIcons();
+    }
+
+    // SIMULASI STEP UNTUK DEMO DOSEN
+    function advanceOrderSimulation() {
+      if (state.currentPage !== 'demo' || !state.demoOrder) return;
+
+      state.demoOrder.step = (state.demoOrder.step % 4) + 1;
+
+      if (state.demoOrder.step === 3) {
+        state.demoOrder.eta = 'Siap Di Meja Ambil!';
+        showToast('🔔 NOTIFIKASI: Makanan kamu sudah SIAP DIAMBIL di Meja SiKantin!');
+      } else if (state.demoOrder.step === 4) {
+        state.demoOrder.eta = 'Selesai';
+        showToast('🎉 Pesanan telah selesai diambil. Terima kasih!');
+      } else {
+        showToast(`Tahap status demo berganti ke Step ${state.demoOrder.step}`);
+      }
+
+      updateStatusDisplay();
+    }
+
+    // --- MODAL CONTROLLER ---
+    function openModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) modal.classList.add('hidden');
+    }
+
+    // --- TOAST NOTIFICATIONS ---
+    function showToast(message) {
+      const box = document.getElementById('toast-box');
+      const toast = document.createElement('div');
+      toast.className = 'bg-slate-900/95 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-xl border border-slate-700/50 flex items-center space-x-2 animate-in slide-in-from-bottom duration-200 pointer-events-auto';
+      toast.innerHTML = `<span>${message}</span>`;
+      box.appendChild(toast);
+
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3500);
+    }
+
+    // ============================================================
+    // KTM SMARTPAY TOP UP LOGIC
+    // ============================================================
+    let state_saldo = 0;
+
+    function formatRupiah(num) {
+      return 'Rp ' + num.toLocaleString('id-ID');
+    }
+
+    function updateSaldoDisplay() {
+      const displays = ['saldo-sidebar', 'saldo-display-card', 'topup-current-saldo'];
+      displays.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        if (id === 'saldo-display-card') {
+          el.innerText = state_saldo >= 1000 ? 'Rp ' + Math.round(state_saldo/1000) + 'rb' : formatRupiah(state_saldo);
+        } else {
+          el.innerText = formatRupiah(state_saldo);
+        }
+      });
+      // Also update checkout payment method label
+      const ktmBadge = document.querySelector('[data-ktm-saldo]');
+      if (ktmBadge) ktmBadge.innerText = 'Sisa: ' + formatRupiah(state_saldo);
+    }
+
+    function selectTopUpAmount(amount) {
+      const input = document.getElementById('topup-custom-input');
+      if (input) input.value = amount;
+      // Highlight selected button
+      document.querySelectorAll('.topup-nominal-btn').forEach(btn => {
+        btn.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-700');
+        btn.classList.add('border-slate-200', 'text-slate-700');
+      });
+      const btns = document.querySelectorAll('.topup-nominal-btn');
+      btns.forEach(btn => {
+        const label = btn.innerText;
+        const match = label.match(/(\d+)/);
+        if (match) {
+          const val = parseInt(match[1]) * (label.includes('rb') ? 1000 : 1);
+          if (val === amount) {
+            btn.classList.add('border-amber-400', 'bg-amber-50', 'text-amber-700');
+            btn.classList.remove('border-slate-200', 'text-slate-700');
+          }
+        }
+      });
+    }
+
+    function syncTopUpInput(val) {
+      // Clear button selections when user types manually
+      document.querySelectorAll('.topup-nominal-btn').forEach(btn => {
+        btn.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-700');
+        btn.classList.add('border-slate-200', 'text-slate-700');
+      });
+    }
+
+    function processTopUp() {
+      const input = document.getElementById('topup-custom-input');
+      const amount = parseInt(input ? input.value : 0);
+
+      if (!amount || amount < 10000) {
+        showToast('⚠️ Minimal top up adalah Rp 10.000');
+        return;
+      }
+      if (amount > 1000000) {
+        showToast('⚠️ Maksimal top up adalah Rp 1.000.000');
+        return;
+      }
+
+      const methodRadios = document.getElementsByName('topup-method');
+      let method = 'QRIS';
+      for (const r of methodRadios) { if (r.checked) method = r.value; }
+
+      // Simulate loading
+      const btn = document.querySelector('#modal-topup button[onclick="processTopUp()"]');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="animate-pulse">⏳ Memproses...</span>';
+      }
+
+      setTimeout(() => {
+        state_saldo += amount;
+        updateSaldoDisplay();
+        closeModal('modal-topup');
+        if (input) input.value = '';
+        document.querySelectorAll('.topup-nominal-btn').forEach(b => {
+          b.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-700');
+          b.classList.add('border-slate-200', 'text-slate-700');
+        });
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i data-lucide="zap" class="w-4 h-4"></i><span>Top Up Sekarang</span>';
+          lucide.createIcons();
+        }
+        showToast('✅ Top Up ' + formatRupiah(amount) + ' via ' + method + ' berhasil! Saldo: ' + formatRupiah(state_saldo));
+      }, 1500);
+    }
+
+    // ============================================================
+    // TENANT MANAGEMENT LOGIC
+    // ============================================================
+    let tenantList = [
+      { id: 't1', name: 'Kantin Bu Siti', desc: 'Spesialis Nasi Ayam & Masakan Rumah', estimasi: '~9 Mnt', status: 'buka' },
+      { id: 't3', name: 'Kopi & Minuman Kampus', desc: 'Es Teh Jumbo, Kopi Susu Aren, Jus Buah', estimasi: '~4 Mnt', status: 'buka' },
+      { id: 't4', name: 'Dapur Yatsi Ceria', desc: 'Siomay, Batagor, Dimsum, Tahu Bakso', estimasi: '~6 Mnt', status: 'buka' }
+    ];
+
+    function renderTenantList() {
+      const grid = document.getElementById('tenant-list-grid');
+      if (!grid) return;
+      const tenantCount = document.getElementById('tenant-count');
+      if (tenantCount) tenantCount.textContent = tenantList.length;
+
+      if (tenantList.length === 0) {
+        grid.innerHTML = `
+          <div class="sm:col-span-2 text-center py-8 text-slate-400">
+            <i data-lucide="store" class="w-10 h-10 mx-auto mb-2 opacity-40"></i>
+            <p class="text-sm font-semibold">Belum ada tenant terdaftar.</p>
+            <p class="text-xs mt-1">Klik "Tambah Tenant" untuk mendaftarkan penyedia pertama.</p>
+          </div>`;
+        lucide.createIcons();
+        return;
+      }
+
+      grid.innerHTML = tenantList.map(t => `
+        <div class="p-3 rounded-lg border ${t.status === 'buka' ? 'border-slate-100' : 'border-slate-200 opacity-70'} bg-slate-50 hover:bg-blue-50/50 transition group relative">
+          <div class="flex items-start justify-between">
+            <div class="flex-1 min-w-0 pr-2">
+              <p class="text-xs font-bold text-slate-800 truncate">${t.name}</p>
+              <p class="text-[11px] text-slate-500 mt-0.5 line-clamp-1">${t.desc || '—'}</p>
+            </div>
+            <div class="flex items-center space-x-1 shrink-0">
+              <button onclick="openEditTenant('${t.id}')" title="Edit" class="p-1 rounded-md hover:bg-blue-100 text-slate-400 hover:text-uym-royal transition">
+                <i data-lucide="pencil" class="w-3.5 h-3.5"></i>
+              </button>
+              <button onclick="deleteTenant('${t.id}')" title="Hapus" class="p-1 rounded-md hover:bg-rose-100 text-slate-400 hover:text-rose-600 transition">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mt-2 flex items-center justify-end text-[10px]">
+            <div class="flex items-center space-x-1.5 text-slate-500">
+              ${t.status === 'tutup' ? '<span class="text-rose-500 font-bold">TUTUP</span>' : '<span>Estimasi ' + t.estimasi + '</span>'}
+            </div>
+          </div>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function openEditTenant(tenantId) {
+      const t = tenantList.find(x => x.id === tenantId);
+      if (!t) return;
+
+      document.getElementById('tenant-modal-title').innerText = 'Edit Data Tenant';
+      document.getElementById('tenant-save-btn-label').innerText = 'Simpan Perubahan';
+      document.getElementById('tenant-edit-id').value = t.id;
+      document.getElementById('tenant-form-name').value = t.name;
+      document.getElementById('tenant-form-desc').value = t.desc;
+      document.getElementById('tenant-form-estimasi').value = t.estimasi;
+
+      const statusRadios = document.getElementsByName('tenant-status');
+      for (const r of statusRadios) { if (r.value === t.status) r.checked = true; }
+
+      openModal('modal-tambah-tenant');
+      lucide.createIcons();
+    }
+
+    function closeTenantModal() {
+      closeModal('modal-tambah-tenant');
+      // Reset form for next use
+      document.getElementById('tenant-modal-title').innerText = 'Tambah Tenant Baru';
+      document.getElementById('tenant-save-btn-label').innerText = 'Simpan Tenant';
+      document.getElementById('tenant-edit-id').value = '';
+      document.getElementById('tenant-form-name').value = '';
+      document.getElementById('tenant-form-desc').value = '';
+      document.getElementById('tenant-form-estimasi').value = '~8 Mnt';
+      const statusRadios = document.getElementsByName('tenant-status');
+      for (const r of statusRadios) { if (r.value === 'buka') r.checked = true; }
+    }
+
+    function saveTenant() {
+      const name = document.getElementById('tenant-form-name').value.trim();
+      if (!name) {
+        showToast('⚠️ Nama tenant wajib diisi!');
+        document.getElementById('tenant-form-name').focus();
+        return;
+      }
+
+      const desc = document.getElementById('tenant-form-desc').value.trim();
+      const estimasi = document.getElementById('tenant-form-estimasi').value;
+      const statusRadios = document.getElementsByName('tenant-status');
+      let status = 'buka';
+      for (const r of statusRadios) { if (r.checked) status = r.value; }
+
+      const editId = document.getElementById('tenant-edit-id').value;
+
+      if (editId) {
+        // Edit existing
+        const idx = tenantList.findIndex(t => t.id === editId);
+        if (idx > -1) {
+          tenantList[idx] = { ...tenantList[idx], name, desc, estimasi, status };
+          showToast('✅ Data tenant "' + name + '" berhasil diperbarui.');
+        }
+      } else {
+        // Add new
+        const newTenant = {
+          id: 't' + Date.now(),
+          name, desc, estimasi, status
+        };
+        tenantList.push(newTenant);
+        showToast('🏪 Tenant "' + name + '" berhasil ditambahkan ke Kantin UYM!');
+      }
+
+      renderTenantList();
+      closeTenantModal();
+    }
+
+    function deleteTenant(tenantId) {
+      const t = tenantList.find(x => x.id === tenantId);
+      if (!t) return;
+      if (!confirm('Hapus tenant "' + t.name + '" dari daftar?')) return;
+      tenantList = tenantList.filter(x => x.id !== tenantId);
+      renderTenantList();
+      showToast('🗑️ Tenant "' + t.name + '" dihapus dari daftar.');
+    }
+
+    // Initialize tenant list and saldo on page load
+    document.addEventListener('DOMContentLoaded', () => {
+      renderTenantList();
+      updateSaldoDisplay();
+    });
+
+  </script>
+
+  <!-- ======================================================== -->
+  <!-- 8. MODAL: KTM SMARTPAY TOP UP                            -->
+  <!-- ======================================================== -->
+  <div id="modal-topup" class="fixed inset-0 z-50 modal-backdrop hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-sm w-full shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden">
+      <!-- Header Gradient -->
+      <div class="bg-gradient-to-r from-amber-500 to-orange-500 p-5 text-white">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-[11px] font-semibold text-amber-100">KTM SmartPay · Universitas Yatsi Madani</p>
+            <h3 class="text-lg font-extrabold mt-0.5">Top Up Saldo</h3>
+          </div>
+          <button onclick="closeModal('modal-topup')" class="p-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white transition">
+            <i data-lucide="x" class="w-4 h-4"></i>
+          </button>
+        </div>
+        <!-- Saldo Card -->
+        <div class="mt-4 bg-white/15 rounded-2xl p-4 border border-white/25">
+          <p class="text-xs text-amber-100 font-medium">Saldo Saat Ini</p>
+          <p id="topup-current-saldo" class="text-3xl font-black mt-1">Rp 0</p>
+          <div class="mt-2 flex items-center space-x-1.5 text-[11px] text-amber-100">
+            <i data-lucide="credit-card" class="w-3.5 h-3.5"></i>
+            <span>Nanda Yudhistira W. · AP2405A</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Body -->
+      <div class="p-5 space-y-4">
+        <!-- Nominal Pilihan Cepat -->
+        <div>
+          <p class="text-xs font-bold text-slate-700 mb-2">Pilih Nominal Top Up:</p>
+          <div class="grid grid-cols-3 gap-2">
+            <button onclick="selectTopUpAmount(20000)" class="topup-nominal-btn border border-slate-200 rounded-xl py-2 text-xs font-bold text-slate-700 hover:border-amber-400 hover:bg-amber-50 transition">Rp 20rb</button>
+            <button onclick="selectTopUpAmount(50000)" class="topup-nominal-btn border border-slate-200 rounded-xl py-2 text-xs font-bold text-slate-700 hover:border-amber-400 hover:bg-amber-50 transition">Rp 50rb</button>
+            <button onclick="selectTopUpAmount(100000)" class="topup-nominal-btn border border-slate-200 rounded-xl py-2 text-xs font-bold text-slate-700 hover:border-amber-400 hover:bg-amber-50 transition">Rp 100rb</button>
+            <button onclick="selectTopUpAmount(150000)" class="topup-nominal-btn border border-slate-200 rounded-xl py-2 text-xs font-bold text-slate-700 hover:border-amber-400 hover:bg-amber-50 transition">Rp 150rb</button>
+            <button onclick="selectTopUpAmount(200000)" class="topup-nominal-btn border border-slate-200 rounded-xl py-2 text-xs font-bold text-slate-700 hover:border-amber-400 hover:bg-amber-50 transition">Rp 200rb</button>
+            <button onclick="selectTopUpAmount(500000)" class="topup-nominal-btn border border-slate-200 rounded-xl py-2 text-xs font-bold text-slate-700 hover:border-amber-400 hover:bg-amber-50 transition">Rp 500rb</button>
+          </div>
+        </div>
+
+        <!-- Nominal Custom -->
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">Atau Masukkan Nominal Sendiri:</label>
+          <div class="relative">
+            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">Rp</span>
+            <input type="number" id="topup-custom-input" min="10000" max="1000000" step="10000" placeholder="Minimal Rp 10.000"
+              oninput="syncTopUpInput(this.value)"
+              class="w-full pl-10 pr-4 py-2.5 text-sm font-bold border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 transition bg-slate-50">
+          </div>
+        </div>
+
+        <!-- Metode Pembayaran Top Up -->
+        <div>
+          <p class="text-xs font-bold text-slate-700 mb-2">Metode Pembayaran:</p>
+          <div class="space-y-1.5">
+            <label class="flex items-center space-x-3 p-3 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50 transition text-xs">
+              <input type="radio" name="topup-method" value="QRIS" checked class="text-amber-500 focus:ring-amber-400">
+              <div>
+                <p class="font-bold text-slate-800">QRIS Kampus</p>
+                <p class="text-[10px] text-slate-500">GoPay, Dana, OVO, ShopeePay, m-Banking</p>
+              </div>
+              <i data-lucide="qr-code" class="w-4 h-4 text-slate-500 ml-auto"></i>
+            </label>
+            <label class="flex items-center space-x-3 p-3 border border-slate-200 rounded-xl cursor-pointer has-[:checked]:border-amber-400 has-[:checked]:bg-amber-50 transition text-xs">
+              <input type="radio" name="topup-method" value="Transfer Bank" class="text-amber-500 focus:ring-amber-400">
+              <div>
+                <p class="font-bold text-slate-800">Transfer Bank</p>
+                <p class="text-[10px] text-slate-500">Virtual Account BCA, Mandiri, BRI, BNI</p>
+              </div>
+              <i data-lucide="building-2" class="w-4 h-4 text-slate-500 ml-auto"></i>
+            </label>
+          </div>
+        </div>
+
+        <!-- Submit -->
+        <button onclick="processTopUp()" class="w-full bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black py-3 rounded-xl text-sm shadow-md transition flex items-center justify-center space-x-2">
+          <i data-lucide="zap" class="w-4 h-4"></i>
+          <span>Top Up Sekarang</span>
+        </button>
+        <p class="text-[10px] text-slate-400 text-center">Saldo akan bertambah otomatis setelah pembayaran dikonfirmasi oleh sistem SiKantin UYM.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- 9. MODAL: TAMBAH / EDIT TENANT                           -->
+  <!-- ======================================================== -->
+  <div id="modal-tambah-tenant" class="fixed inset-0 z-50 modal-backdrop hidden flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-200">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div class="flex items-center space-x-2">
+          <div class="w-8 h-8 bg-uym-soft rounded-lg flex items-center justify-center">
+            <i data-lucide="store" class="w-4 h-4 text-uym-royal"></i>
+          </div>
+          <h4 id="tenant-modal-title" class="font-extrabold text-sm text-slate-800">Tambah Tenant Baru</h4>
+        </div>
+        <button onclick="closeTenantModal()" class="p-1 rounded-full hover:bg-slate-100 text-slate-400">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <input type="hidden" id="tenant-edit-id" value="">
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">Nama Penyedia / Tenant <span class="text-rose-500">*</span></label>
+          <input type="text" id="tenant-form-name" placeholder="cth. Warung Pak Budi" maxlength="60"
+            class="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-uym-royal focus:border-uym-royal bg-slate-50 transition">
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">Deskripsi Menu Unggulan</label>
+          <input type="text" id="tenant-form-desc" placeholder="cth. Nasi Goreng, Mie Ayam, Es Jeruk" maxlength="80"
+            class="w-full border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-uym-royal focus:border-uym-royal bg-slate-50 transition">
+        </div>
+        <div>
+            <label class="block text-xs font-bold text-slate-700 mb-1.5">Estimasi Waktu</label>
+            <select id="tenant-form-estimasi" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-uym-royal bg-slate-50 transition">
+              <option value="~5 Mnt">~5 Mnt</option>
+              <option value="~8 Mnt" selected>~8 Mnt</option>
+              <option value="~10 Mnt">~10 Mnt</option>
+              <option value="~12 Mnt">~12 Mnt</option>
+              <option value="~15 Mnt">~15 Mnt</option>
+            </select>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-slate-700 mb-1.5">Status</label>
+          <div class="flex items-center space-x-4 text-xs">
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="radio" name="tenant-status" value="buka" checked class="text-uym-royal focus:ring-uym-royal">
+              <span class="font-semibold text-emerald-700">🟢 Buka</span>
+            </label>
+            <label class="flex items-center space-x-2 cursor-pointer">
+              <input type="radio" name="tenant-status" value="tutup" class="text-uym-royal focus:ring-uym-royal">
+              <span class="font-semibold text-slate-500">🔴 Tutup / Libur</span>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex space-x-2 pt-1">
+        <button onclick="closeTenantModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl text-sm transition">Batal</button>
+        <button onclick="saveTenant()" class="flex-1 bg-uym-navy hover:bg-uym-royal text-white font-bold py-2.5 rounded-xl text-sm transition flex items-center justify-center space-x-1.5">
+          <i data-lucide="save" class="w-4 h-4"></i>
+          <span id="tenant-save-btn-label">Simpan Tenant</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
